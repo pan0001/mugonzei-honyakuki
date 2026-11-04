@@ -70,6 +70,13 @@ internal static class Program
             GoogleScreenshotDiagnostics.RunAsync(imagePath, args.Contains("--ocr-only")).GetAwaiter().GetResult();
             return;
         }
-        Application.Run(new MainForm(args.Contains("--demo")));
+        bool demo = args.Contains("--demo");
+        if (!demo && SettingsStore.NeedsInitialSetup())
+        {
+            // Create no VR, hotkey or translation services until setup is saved.
+            using var setup = new SetupWizardForm(new AppSettings(), settings => SettingsStore.Save(settings));
+            if (setup.ShowDialog() != DialogResult.OK) return;
+        }
+        Application.Run(new MainForm(demo));
     }
 }

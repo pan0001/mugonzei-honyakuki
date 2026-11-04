@@ -33,6 +33,9 @@ public sealed class AppSettings
     public float OverlayVerticalOffset { get; set; } = -0.35f;
     public int DisplaySeconds { get; set; } = 20;
     public bool ShowSource { get; set; } = false;
+
+    // All settings are value types or immutable strings, including the in-memory API key.
+    public AppSettings Copy() => (AppSettings)MemberwiseClone();
 }
 
 public static class SettingsStore
@@ -42,6 +45,11 @@ public static class SettingsStore
 
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("SteamVrTranslator/API-key/v1");
     private static readonly JsonSerializerOptions JsonOptions = new() { WriteIndented = true };
+
+    // Existing installations predate the wizard. A saved file is sufficient evidence
+    // of setup; never replace a user's settings just because a new flag is absent.
+    public static bool NeedsInitialSetup(string? directoryPath = null) =>
+        !File.Exists(Path.Combine(directoryPath ?? DirectoryPath, "settings.json"));
 
     private sealed class SettingsDocument
     {
@@ -109,7 +117,7 @@ public static class SettingsStore
         }
     }
 
-    private static void ValidateShape(AppSettings settings)
+    internal static void ValidateShape(AppSettings settings)
     {
         static bool Text(string? value, int maximum, bool allowEmpty = false) => value is not null
             && value.Length <= maximum && (allowEmpty || !string.IsNullOrWhiteSpace(value));

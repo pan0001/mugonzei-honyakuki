@@ -151,7 +151,7 @@ public sealed class TranslationClient : IDisposable
         return await SendAsync(endpoint, apiKey, body, true, settings.ApiStream, token).ConfigureAwait(false);
     }
 
-    private static (Uri Endpoint, string ApiKey) ValidateSettings(AppSettings settings, bool requireTargetLanguage = true)
+    internal static (Uri Endpoint, string ApiKey) ValidateSettings(AppSettings settings, bool requireTargetLanguage = true)
     {
         if (string.IsNullOrWhiteSpace(settings.ApiModel) || settings.ApiModel.Length > 256 || settings.ApiModel.Any(char.IsControl))
             throw new InvalidOperationException("请先在设置中填写 AI 模型名称。");

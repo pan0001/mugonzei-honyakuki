@@ -4,7 +4,7 @@
 [CmdletBinding()]
 param(
     [string]$PublishDirectory = 'dist/SteamVrTranslator',
-    [string]$ArchiveName = 'Mugonzei-Honyakuki-win-x64-v0.1.0-preview.zip'
+    [string]$ArchiveName = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -16,6 +16,12 @@ $workspaceRoot = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..')).TrimEnd(
 $workspacePrefix = $workspaceRoot + [IO.Path]::DirectorySeparatorChar
 if (-not (Test-Path -LiteralPath (Join-Path $workspaceRoot 'SteamVrTranslator.csproj') -PathType Leaf)) {
     throw 'Run the copy of this script located in the SteamVrTranslator workspace tools directory.'
+}
+if ([string]::IsNullOrWhiteSpace($ArchiveName)) {
+    [xml]$project = Get-Content -LiteralPath (Join-Path $workspaceRoot 'SteamVrTranslator.csproj') -Raw
+    $version = [string]$project.Project.PropertyGroup.Version
+    if ([string]::IsNullOrWhiteSpace($version)) { throw 'Project version is missing.' }
+    $ArchiveName = 'Mugonzei-Honyakuki-win-x64-v' + $version + '.zip'
 }
 if ([string]::IsNullOrWhiteSpace($PublishDirectory)) { throw 'PublishDirectory must not be empty.' }
 if ([string]::IsNullOrWhiteSpace($ArchiveName) -or [IO.Path]::GetFileName($ArchiveName) -ne $ArchiveName -or

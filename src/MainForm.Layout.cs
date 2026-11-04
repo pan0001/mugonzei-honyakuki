@@ -155,8 +155,11 @@ internal sealed partial class MainForm
     {
         var stack = SettingsPage("AI 服务", 1);
         var general = SettingsCard(stack, "翻译偏好", "选择内容如何被识别，以及交给谁翻译");
+        var setup = Button("配置向导");
+        setup.Click += (_, _) => TryAction(OpenSetupWizard);
+        SettingRow(general, "快速配置", setup);
         SettingRow(general, "翻译服务", backend);
-        SettingRow(general, "识别方式", processingMode);
+        SettingRow(general, "识图方式", processingMode);
         SettingRow(general, "目标语言", target);
         localOcrSettingsCard = SettingsCard(stack, "本地日语手写", "NDLOCR-Lite · CPU 识别 · 图片留在本机");
         SettingRow(localOcrSettingsCard, "引擎状态", localOcrStatus);
@@ -293,7 +296,7 @@ internal sealed partial class MainForm
         apiKey.PlaceholderText = "本机 Ollama 可留空；保存时使用 Windows 加密";
         backend.Items.AddRange(["本机 Codex", "其他 AI API", "Google Translate（后台网页）"]);
         backend.SelectedIndexChanged += (_, _) => UpdateBackendControls();
-        processingMode.Items.AddRange(["本地 OCR → 文字翻译", "直接发送截图给模型", "手写体 OCR（AI）→ 翻译", "本地日语手写 OCR → 翻译"]);
+        processingMode.Items.AddRange(["本地OCR（不推荐）", "直接发送截图给模型", "手写体 OCR（AI）→ 翻译", "本地日语手写 OCR → 翻译"]);
         processingMode.SelectedIndexChanged += (_, _) => UpdateBackendControls();
         codexPath.PlaceholderText = "留空自动查找，或填写 codex.exe 的完整路径";
         codexModel.PlaceholderText = "留空使用 Codex 默认模型";

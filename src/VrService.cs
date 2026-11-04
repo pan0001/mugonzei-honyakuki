@@ -72,6 +72,14 @@ public sealed class VrService : IDisposable
     public event Action<string>? SelectionAborted;
     public event Action? SpatialAnchorsInvalidated;
     public SpatialSelection? CurrentSelection => _selectionGesture.Current;
+
+    internal void ResetTranslationInput()
+    {
+        AssertThread();
+        _translateHold.Reset();
+        AbortSelection("配置已结束，请松开按键后重新框选。");
+    }
+
     public bool SelectionMode
     {
         get => _selectionMode;

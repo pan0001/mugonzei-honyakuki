@@ -13,6 +13,11 @@ if (args.Length == 2 && args[0] == "--fake-local-ocr")
 
 try
 {
+    if (args.Contains("--setup-regression"))
+    {
+        SetupWizardTests.Run();
+        return;
+    }
     if (args.Contains("--codex-settings-regression"))
     {
         await CodexReasoningSettingsTests.RunAsync();
@@ -34,6 +39,7 @@ try
         Console.WriteLine("PASS focused hold animation, native presentation state, cancellation and input continuity regression");
         return;
     }
+    SetupWizardTests.Run();
     LongPressTests.Run();
     CaptureRequestTests.Run();
     GestureCancelTests.Run();

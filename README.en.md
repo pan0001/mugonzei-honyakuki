@@ -36,21 +36,37 @@ The desktop interface is currently mainly in Simplified Chinese. This repository
 ## Quick start
 
 1. Download the Windows archive from [Releases](https://github.com/pan0001/mugonzei-honyakuki/releases) and **extract the entire archive** into a writable directory. Do not copy just the `.exe`.
-2. Start SteamVR, connect your headset, enter the game, then run `SteamVrTranslator.exe`.
-3. In 「AI 服务」 (AI Services), choose a translation service and recognition mode, set the target language, and click 「保存设置」 (Save Settings). The initial configuration defaults to local Codex + local OCR; it does not automatically upload screenshots to a model.
-4. To use Codex for image recognition, choose 「直接发送截图给模型」 (Send Screenshot Directly to Model) or 「手写体 OCR（AI）→ 翻译」 (AI Handwriting OCR → Translation). You can enter `gpt-6.1-terra` as the model and select `low` for reasoning effort, subject to the models actually available to your account.
-5. Face the text and hold the left X button. **When the ring fills at 1.5 seconds, the app captures the view and starts translation.** Release the button and wait for the subtitles. Recognition and translation take additional time; the hold timer is not the total waiting time.
-6. If you no longer need that translation, keep holding until **3 seconds**. When the second ring fills, the task is canceled and the subtitles are hidden. Release the button before holding it again to take a new screenshot.
+2. Start SteamVR, connect your headset, enter the game, then run `SteamVrTranslator.exe`. A three-step setup wizard opens automatically on first launch.
+3. In step one, choose the translation service, 「识图方式」 (Image Recognition Mode), and target language. The defaults are local Codex + 「本地OCR（不推荐）」 (Local OCR, not recommended); this does not automatically upload screenshots to a model.
+4. In step two, configure Codex, your API, or Google. You can leave the Codex model blank; reasoning effort defaults to 「自动（按阶段）」 (Automatic by Stage). APIs require an address and model; a local service without authentication can leave the key blank. Google can only be paired with local OCR or local Japanese OCR.
+5. In step three, choose the capture source and review the hotkeys, VR controller settings, and summary, then click 「保存并开始」 (Save and Start). Only after completion does the app open the workspace, connect to SteamVR, and enable hotkeys.
+6. Face the text and hold the left X button. **When the ring fills at 1.5 seconds, the app captures the view and starts translation.** Release the button and wait for the subtitles. Recognition and translation take additional time; the hold timer is not the total waiting time.
+7. If you no longer need that translation, keep holding until **3 seconds**. When the second ring fills, the task is canceled and the subtitles are hidden. Release the button before holding it again to take a new screenshot.
+
+Closing the wizard before completing first-time setup exits the app; the wizard appears again on the next launch. Existing settings are reused automatically without forcing setup again. To reopen it, click 「配置向导」 (Setup Wizard) on the 「AI 服务」 (AI Services) page; canceling leaves saved settings unchanged. The app identifies a first launch by the absence of `%LOCALAPPDATA%/SteamVrTranslator/settings.json`.
 
 「检测 Codex 登录」 (Check Codex Login) only checks login status. 「测试字幕」 (Test Subtitles) only displays a fixed example sentence. Use a recognition button to check the source text first; AI recognition buttons still send images. Minimizing keeps the app in the system tray; closing the window exits the app.
 
 If `VCRUNTIME140.dll` or `MSVCP140.dll` is missing, install Microsoft's [Visual C++ x64 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe). For installing the runtime required by Google webpage mode, see [Microsoft WebView2](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution).
 
-## Choosing a recognition mode
+## Upgrading and incremental updates
+
+To upgrade to `0.1.1-preview` or a later version, exit the old instance first, extract the entire new archive into a new directory, then run the new version. Settings remain in `%LOCALAPPDATA%/SteamVrTranslator/` and are not overwritten by changing the application directory. You do not need to copy program files from the old directory or repeat first-time setup.
+
+To update a Git source checkout, run the following commands in the existing repository, then launch the newly built application:
+
+```powershell
+git pull --ff-only
+.\build.ps1
+```
+
+Further changes are delivered through incremental commits and released under new version tags. Published versions and existing tags are retained.
+
+## Choosing an image recognition mode
 
 | Mode in the UI | Processing flow | Where images go |
 | --- | --- | --- |
-| 本地 OCR → 文字翻译 (Local OCR → Text Translation) | Tesseract recognition, followed by text translation | Recognition stays on your computer; only the source text is sent to the translation service |
+| 本地OCR（不推荐） (Local OCR, not recommended) | Tesseract recognition, followed by text translation | Recognition stays on your computer; only the source text is sent to the translation service |
 | 直接发送截图给模型 (Send Screenshot Directly to Model) | A vision model reads and translates the image, choosing its own output format | The screenshot is sent to the selected Codex / API service |
 | 手写体 OCR（AI）→ 翻译 (AI Handwriting OCR → Translation) | Automatic region detection → reading enlarged details → translation | The full image and detail images are sent to the selected Codex / API service |
 | 本地日语手写 OCR → 翻译 (Local Japanese Handwriting OCR → Translation) | Local NDLOCR-Lite recognition, followed by text translation | Recognition stays on your computer; only the source text is sent to the translation service |
@@ -62,6 +78,8 @@ AI handwriting recognition usually makes two vision requests, with one additiona
 ### Codex
 
 The app uses the Codex CLI's existing login; you do not need to enter an API key here. Leave the executable path blank for automatic detection. Leave the model blank to use the CLI's default selection. The app does not inherit the model setting from your personal `config.toml` or continue an existing chat.
+
+To use Codex for image recognition, set 「识图方式」 (Image Recognition Mode) to 「直接发送截图给模型」 (Send Screenshot Directly to Model) or 「手写体 OCR（AI）→ 翻译」 (AI Handwriting OCR → Translation). To specify a model, you can enter `gpt-6.1-terra`, subject to the models actually available to your account.
 
 「思考程度」 (Reasoning Effort) supports 「自动（按阶段）」 (Automatic by Stage), `low`, `medium`, and `high`. Automatic uses low for direct image analysis and text translation, medium for locating handwriting, and high for reading multiple views in detail. An explicit selection overrides every Codex recognition and translation stage. Save changes before using them. Calls count toward your account usage; account permissions, limits, and network conditions affect availability.
 
@@ -80,7 +98,7 @@ Start the local service and load a suitable model yourself first. You can leave 
 
 ### Background Google Translate webpage
 
-Select 「Google Translate（后台网页）」 (Google Translate — Background Webpage) together with local OCR or local Japanese OCR. The app enters recognized text into a separate WebView2 page and reads the translation. No API key is required. This is neither Gemini nor the Google Cloud Translation API.
+Select 「Google Translate（后台网页）」 (Google Translate — Background Webpage) together with 「本地OCR（不推荐）」 (Local OCR, not recommended) or local Japanese OCR. The app enters recognized text into a separate WebView2 page and reads the translation. No API key is required. This is neither Gemini nor the Google Cloud Translation API.
 
 The webpage works in the background by default, without using desktop mouse automation to enter text. 「查看翻译网页」 (View Translation Webpage) shows the page. Each request is limited to 5,000 characters. CAPTCHAs, rate limits, access denials, or changes to the webpage may cause translation to fail. The app does not bypass verification or automatically switch services.
 
@@ -140,7 +158,7 @@ The regular automated tests use fixed samples and mock services. `--demo` does n
 
 Handwriting, small text, perspective, reflections, and complex backgrounds can cause incorrect or missing characters, or include unrelated background text. Tests on development samples do not establish accuracy in real use. SteamVR controller input, headset readability, and service compatibility need to be checked with the actual devices and services. Google webpage mode may stop working when the webpage changes.
 
-When reporting a problem, include the application version, recognition mode, service name, controller type, and steps to reproduce it. If you choose to provide an image, crop out unrelated or private content first, and include the correct source text and the incorrect result.
+When reporting a problem, include the application version, image recognition mode, service name, controller type, and steps to reproduce it. If you choose to provide an image, crop out unrelated or private content first, and include the correct source text and the incorrect result.
 
 ## Third-party components
 

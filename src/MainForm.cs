@@ -75,7 +75,7 @@ internal sealed partial class MainForm : Form
     private long lastHoldPaintAt, lastHoldGestureId;
     private int lastHoldBucket = -1;
     private bool holdOverlayVisible, lastHoldCancelStage, captureInProgress;
-    private bool busy, closing, overlayVisible, disposedServices;
+    private bool busy, closing, overlayVisible, disposedServices, setupDialogOpen;
     private readonly bool demo;
 
     public MainForm(bool demo)
@@ -381,20 +381,14 @@ internal sealed partial class MainForm : Form
             SpatialSelectionEnabled = spatialSelection.Checked, SelectionDistance = (float)selectionDistance.Value
         };
 
-    private void ApplySettings()
+    private void ApplySettings() => SaveSettings(ReadSettingsDraft());
+
+    private void SaveSettings(AppSettings changed)
     {
         if (busy) throw new InvalidOperationException("请等待本次翻译完成或先取消，再保存设置。");
         if (apiVisionCheck is not null) throw new InvalidOperationException("请等待图片测试完成或取消，再保存设置。");
         if (googleTranslationCheck is not null) throw new InvalidOperationException("请等待谷歌翻译测试完成或取消，再保存设置。");
-        var changed = ReadSettingsDraft();
-        if (changed.CropX + changed.CropWidth > 1.0001 || changed.CropY + changed.CropHeight > 1.0001)
-            throw new ArgumentException("识别范围超出图像：左 + 宽、上 + 高不能超过 100%。");
-        if (changed.TargetLanguage.Length == 0 || changed.OcrLanguages.Length == 0) throw new ArgumentException("请填写目标语言和 OCR 语言。");
-        ValidateBackendMode(changed);
-        if (changed.TranslationBackend == "GoogleTranslate") GoogleTranslateClient.NormalizeTargetLanguage(changed.TargetLanguage);
-        var desired = Hotkeys.Parse(changed.Hotkey);
-        if (new[] { "Ctrl+Alt+Right", "Ctrl+Alt+Left", "Ctrl+Alt+H" }.Any(h => Hotkeys.Parse(h) == desired))
-            throw new ArgumentException("该快捷键已用于翻页或隐藏叠层，请选择其他按键。");
+        SettingsValidation.ValidateForSave(changed);
         try
         {
             hotkeys?.Register(Hotkeys.Translate, changed.Hotkey);
@@ -406,17 +400,56 @@ internal sealed partial class MainForm : Form
             throw;
         }
         settings = changed;
-        CancelSelectionCapture();
-        vr.SelectionEnabled = false;
-        ConfigureVrSelection();
+        string? runtimeWarning = null;
+        try
+        {
+            CancelSelectionCapture();
+            vr.SelectionEnabled = false;
+            ConfigureVrSelection();
+        }
+        catch (Exception error)
+        {
+            // Persistence already succeeded. A disconnected headset must not make
+            // the wizard claim that saving failed or let Cancel imply a rollback.
+            RuntimeFaultLog.Record("settings.apply-vr", error);
+            runtimeWarning = " SteamVR 暂未应用新设置，请重新连接。";
+        }
         UpdateSelectionHelp();
         UpdateRecognitionAction();
-        SetStatus("设置已保存 · " + ReadyMessage());
+        SetStatus("设置已保存 · " + ReadyMessage() + runtimeWarning);
+    }
+
+    private void OpenSetupWizard()
+    {
+        if (closing || setupDialogOpen) return;
+        if (busy || selectionActive || selectionCapture is not null || loginCheck is not null
+            || apiVisionCheck is not null || googleTranslationCheck is not null)
+            throw new InvalidOperationException("请先完成或取消当前任务，再打开配置向导。");
+        bool resumePolling = pollTimer.Enabled;
+        setupDialogOpen = true;
+        pollTimer.Stop();
+        try
+        {
+            vr.ResetTranslationInput();
+            TryAction(HideHoldOverlay);
+            using var setup = new SetupWizardForm(ReadSettingsDraft(), SaveSettings, firstRun: false);
+            if (setup.ShowDialog(this) == DialogResult.OK) LoadSettings();
+        }
+        finally
+        {
+            // A button held while configuring must be released before the next capture.
+            try { vr.ResetTranslationInput(); }
+            finally
+            {
+                setupDialogOpen = false;
+                if (!closing && resumePolling) pollTimer.Start();
+            }
+        }
     }
 
     private async Task CaptureAndTranslate(bool ocrOnly, string source = "桌面按钮", long gestureId = 0, SelectionCaptureSnapshot? selection = null)
     {
-        if (closing) return;
+        if (closing || setupDialogOpen) return;
         if (apiVisionCheck is not null) { SetStatus("API 图片测试进行中，请等待完成或先取消测试。"); return; }
         if (googleTranslationCheck is not null) { SetStatus("谷歌翻译测试进行中，请等待完成或先取消测试。"); return; }
         if ((settings.ProcessingMode != SelectedProcessingMode || !ocrOnly || settings.ProcessingMode is "Handwriting" or "Image") && HasPendingAiSettings)
@@ -631,7 +664,7 @@ internal sealed partial class MainForm : Form
 
     private void BeginSelection(long gestureId)
     {
-        if (closing || !settings.SpatialSelectionEnabled || !settings.ControllerEnabled) return;
+        if (closing || setupDialogOpen || !settings.SpatialSelectionEnabled || !settings.ControllerEnabled) return;
         if (apiVisionCheck is not null || googleTranslationCheck is not null || HasPendingAiSettings)
         {
             SetStatus("请先完成服务测试或保存 AI 设置，再开始框选。");
@@ -782,7 +815,7 @@ internal sealed partial class MainForm : Form
 
     private void Poll()
     {
-        if (closing) return;
+        if (closing || setupDialogOpen) return;
         try { TryRecoverVrConnection(); }
         catch (Exception error)
         {
@@ -901,7 +934,7 @@ internal sealed partial class MainForm : Form
 
     private void ChangePage(int offset)
     {
-        if (pages.Count == 0 || busy || selectionActive || selectionCapture is not null) return;
+        if (setupDialogOpen || pages.Count == 0 || busy || selectionActive || selectionCapture is not null) return;
         pageIndex = (pageIndex + offset + pages.Count) % pages.Count;
         TryAction(() => { ShowPage(); SetStatus($"当前叠层第 {pageIndex + 1} / {pages.Count} 页。"); });
     }
@@ -934,7 +967,7 @@ internal sealed partial class MainForm : Form
 
     protected override void WndProc(ref Message m)
     {
-        if (m.Msg == 0x0312 && !closing)
+        if (m.Msg == 0x0312 && !closing && !setupDialogOpen)
         {
             switch (m.WParam.ToInt32())
             {
@@ -972,11 +1005,7 @@ internal sealed partial class MainForm : Form
     }
 
     private void RestoreWindow() { Show(); WindowState = FormWindowState.Normal; Activate(); }
-    internal static void ValidateBackendMode(AppSettings settings)
-    {
-        if (settings.TranslationBackend == "GoogleTranslate" && settings.ProcessingMode is "Image" or "Handwriting")
-            throw new InvalidOperationException("Google Translate 只翻译文字，请选择本地 OCR 或本地日语手写 OCR。AI 手写和直接识图请使用 Codex 或视觉 API。");
-    }
+    internal static void ValidateBackendMode(AppSettings settings) => SettingsValidation.ValidateBackendMode(settings);
     private void SetStatus(string text) => status.Text = text;
     private void TryAction(Action action) { try { action(); } catch (Exception ex) { SetStatus(ex.Message); } }
     private TabPage Page(string title) { var page = new TabPage(title) { BackColor = Background, ForeColor = Ink }; tabs.TabPages.Add(page); return page; }
