@@ -1,0 +1,18 @@
+{
+  "controller_type": "vive_controller",
+  "action_manifest_version": 3,
+  "name": "Mugonzei Honyakuki - right menu and two pointers",
+  "description": "Hold right application menu to select with both controller pointers, then release. Full-view mode captures after 1.5 seconds. Left application menu turns page. Buttons retain their game functions.",
+  "bindings": {
+    "/actions/translator": {
+      "poses": [
+        { "path": "/user/hand/left/pose/tip", "output": "/actions/translator/in/leftpointer" },
+        { "path": "/user/hand/right/pose/tip", "output": "/actions/translator/in/rightpointer" }
+      ],
+      "sources": [
+        { "path": "/user/hand/right/input/application_menu", "mode": "button", "inputs": { "click": { "output": "/actions/translator/in/translate" } } },
+        { "path": "/user/hand/left/input/application_menu", "mode": "button", "inputs": { "click": { "output": "/actions/translator/in/nextpage" } } }
+      ]
+    }
+  }
+}

@@ -1,0 +1,9 @@
+* text=auto
+*.md text eol=lf
+*.cs text eol=lf
+*.json text eol=lf
+*.ps1 text eol=lf
+*.py text eol=lf
+*.cmd text eol=crlf
+*.dll binary
+*.traineddata binary

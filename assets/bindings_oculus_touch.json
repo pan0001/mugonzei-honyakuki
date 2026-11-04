@@ -1,0 +1,18 @@
+{
+  "controller_type": "oculus_touch",
+  "action_manifest_version": 3,
+  "name": "Mugonzei Honyakuki - left X and two pointers",
+  "description": "Hold left X to select with both controller pointers, then release. Full-view mode captures after 1.5 seconds. Left thumbstick turns page. Buttons retain their game functions.",
+  "bindings": {
+    "/actions/translator": {
+      "poses": [
+        { "path": "/user/hand/left/pose/tip", "output": "/actions/translator/in/leftpointer" },
+        { "path": "/user/hand/right/pose/tip", "output": "/actions/translator/in/rightpointer" }
+      ],
+      "sources": [
+        { "path": "/user/hand/left/input/x", "mode": "button", "inputs": { "click": { "output": "/actions/translator/in/translate" } } },
+        { "path": "/user/hand/left/input/joystick", "mode": "button", "inputs": { "click": { "output": "/actions/translator/in/nextpage" } } }
+      ]
+    }
+  }
+}
