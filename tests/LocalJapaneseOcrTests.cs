@@ -105,7 +105,14 @@ public static class LocalJapaneseOcrTests
     {
         Console.InputEncoding = new UTF8Encoding(false); Console.OutputEncoding = new UTF8Encoding(false);
         string? pidFile = Environment.GetEnvironmentVariable("LOCAL_OCR_TEST_PID");
-        if (pidFile is not null) File.WriteAllText(pidFile, Environment.ProcessId.ToString());
+        if (pidFile is not null)
+        {
+            // Publish only after the writer has closed its handle. File.Exists on
+            // the final name must not expose a partially written/locked PID file.
+            string pendingPidFile = pidFile + ".tmp";
+            File.WriteAllText(pendingPidFile, Environment.ProcessId.ToString());
+            File.Move(pendingPidFile, pidFile, overwrite: true);
+        }
         await Console.Error.WriteAsync(new string('x', 65536));
         if (mode == "startup") { Console.WriteLine("{\"type\":\"fatal\",\"code\":\"private-worker-detail\"}"); return; }
         Console.WriteLine("{\"type\":\"ready\",\"protocol\":1}");
@@ -145,6 +152,9 @@ public static class LocalJapaneseOcrTests
             Service = new LocalJapaneseOcrService(() =>
             {
                 string mode = modes[Math.Min(Starts++, modes.Length - 1)];
+                // A restarted worker must publish its own PID, never satisfy a
+                // readiness check with the previous worker's record.
+                if (File.Exists(PidFile)) File.Delete(PidFile);
                 var start = new ProcessStartInfo(Environment.ProcessPath!)
                 {
                     UseShellExecute = false, CreateNoWindow = true,
@@ -159,17 +169,35 @@ public static class LocalJapaneseOcrTests
         }
         public async Task<int> WaitForPidAsync()
         {
-            for (int attempt = 0; attempt < 300; attempt++)
+            var elapsed = Stopwatch.StartNew();
+            IOException? lastSharingError = null;
+            while (elapsed.Elapsed < TimeSpan.FromSeconds(3))
             {
-                if (File.Exists(PidFile) && int.TryParse(await File.ReadAllTextAsync(PidFile), out int pid)) return pid;
+                if (File.Exists(PidFile))
+                {
+                    try
+                    {
+                        string contents = await File.ReadAllTextAsync(PidFile);
+                        if (int.TryParse(contents, out int pid) && pid > 0) return pid;
+                        throw new InvalidDataException("Fake local OCR published an invalid PID.");
+                    }
+                    catch (IOException error) when ((error.HResult & 0xffff) is 32 or 33)
+                    {
+                        // Retry only Windows sharing/lock violations. Invalid
+                        // contents and other I/O failures still fail immediately.
+                        lastSharingError = error;
+                    }
+                }
                 await Task.Delay(10);
             }
-            throw new Exception("Fake local OCR did not start.");
+            throw new TimeoutException("Fake local OCR did not publish its PID within 3 seconds.", lastSharingError);
         }
         public void Dispose()
         {
             Service.Dispose();
             if (File.Exists(PidFile)) File.Delete(PidFile);
+            // Cancellation may stop the fake process before its atomic rename.
+            if (File.Exists(PidFile + ".tmp")) File.Delete(PidFile + ".tmp");
             // Fail visibly if the service left any unexpected files; never recursively delete them.
             Directory.Delete(Root, false);
         }
