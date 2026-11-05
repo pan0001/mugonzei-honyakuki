@@ -93,7 +93,7 @@ internal sealed partial class MainForm
             ShowStatus("没有可显示的正文"); return;
         }
         translatedText.Text = translation;
-        await PublishResultPagesAsync(translation, request.GestureId, token, settings.ShowSource ? sourceText.Text : null);
+        await PublishResultPagesAsync(translation, request.GestureId, token, png is null && settings.ShowSource ? sourceText.Text : null);
         SetStatus($"翻译完成 · 扣除 1 积分 · 余额 {result.Balance} 分 · {started.Elapsed.TotalSeconds:F1} 秒 · {pages.Count} 页");
     }
 }

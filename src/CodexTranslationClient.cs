@@ -98,7 +98,7 @@ public sealed class CodexTranslationClient
             throw new InvalidOperationException("Codex 模型名称无效。");
 
         string prompt = handwriting ? HandwritingPrompt.Request : VisionPrompt.BuildRequest(settings);
-        string instructions = handwriting ? HandwritingPrompt.Instructions : VisionPrompt.Instructions;
+        string instructions = handwriting ? HandwritingPrompt.Instructions : VisionPrompt.TranslationInstructions(settings);
         string result = await RunImagesAsync([png], settings, instructions, prompt, "low", token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
         return VisionPrompt.NormalizeResult(result);

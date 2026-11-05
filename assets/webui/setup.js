@@ -98,7 +98,7 @@
       $('key').value = '';
       const image = ['Handwriting', 'Image'].includes(data.processingMode);
       const destination = {Credits:'账号积分服务及其 AI 提供方', OpenAI:'你设置的模型服务', Codex:'本机 Codex 使用的模型', GoogleTranslate:'Google 翻译'}[backend];
-      setText($('disclosure'), (image ? '截图会发送到' : '识别出的文字会发送到') + destination + '。');
+      setText($('disclosure'), image ? '截图会发送到' + destination + '，一次请求直接返回译文。' : '识别出的文字会发送到' + destination + '。');
     }
     hasKey = data.hasApiKey; keyOrigin = data.keyOrigin; keyHint();
     setText($('title'), current === 0 ? '选择翻译服务' : current === 2 ? '选择使用模式' : registering ? '注册账号' : login ? '登录账号' : '设置翻译服务');

@@ -118,14 +118,15 @@ public sealed class TranslationClient : IDisposable
         VisionImage.ValidatePng(png);
         // Validate before building the target-language JSON, preserving the single-image contract.
         _ = ValidateSettings(settings, requireTargetLanguage: !handwriting);
-        string result = await SendImagesAsync([png], settings, handwriting ? HandwritingPrompt.Instructions : VisionPrompt.Instructions,
-            handwriting ? HandwritingPrompt.Request : VisionPrompt.BuildRequest(settings), !handwriting, token).ConfigureAwait(false);
+        string result = await SendImagesAsync([png], settings, handwriting ? HandwritingPrompt.Instructions : VisionPrompt.TranslationInstructions(settings),
+            handwriting ? HandwritingPrompt.Request : VisionPrompt.BuildRequest(settings), !handwriting, token,
+            allowRetry: handwriting).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
         return VisionPrompt.NormalizeResult(result);
     }
 
     private async Task<string> SendImagesAsync(IReadOnlyList<byte[]> images, AppSettings settings,
-        string instructions, string prompt, bool requireTargetLanguage, CancellationToken token)
+        string instructions, string prompt, bool requireTargetLanguage, CancellationToken token, bool allowRetry = true)
     {
         ArgumentNullException.ThrowIfNull(settings);
         token.ThrowIfCancellationRequested();
@@ -148,7 +149,7 @@ public sealed class TranslationClient : IDisposable
                 new { role = "user", content }
             }
         });
-        return await SendAsync(endpoint, apiKey, body, true, settings.ApiStream, token).ConfigureAwait(false);
+        return await SendAsync(endpoint, apiKey, body, true, settings.ApiStream, token, allowRetry).ConfigureAwait(false);
     }
 
     internal static (Uri Endpoint, string ApiKey) ValidateSettings(AppSettings settings, bool requireTargetLanguage = true)
@@ -168,15 +169,18 @@ public sealed class TranslationClient : IDisposable
         return (endpoint, apiKey);
     }
 
-    private async Task<string> SendAsync(Uri endpoint, string apiKey, string body, bool imageRequest, bool streamResponse, CancellationToken token)
+    private async Task<string> SendAsync(Uri endpoint, string apiKey, string body, bool imageRequest, bool streamResponse,
+        CancellationToken token, bool allowRetry = true)
     {
         token.ThrowIfCancellationRequested();
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromSeconds(60));
         try
         {
-            for (int attempt = 0; attempt < 2; attempt++)
+            for (int attempt = 0; ; attempt++)
             {
+                // A screenshot may already have been processed when its response is lost.
+                bool canRetry = allowRetry && attempt == 0;
                 using var request = new HttpRequestMessage(HttpMethod.Post, endpoint);
                 request.Content = new StringContent(body, Encoding.UTF8, "application/json");
                 if (!string.IsNullOrWhiteSpace(apiKey))
@@ -187,7 +191,7 @@ public sealed class TranslationClient : IDisposable
                     response = await client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, deadline.Token)
                         .ConfigureAwait(false);
                 }
-                catch (HttpRequestException) when (attempt == 0)
+                catch (HttpRequestException) when (canRetry)
                 {
                     await Task.Delay(300, deadline.Token).ConfigureAwait(false);
                     continue;
@@ -196,7 +200,7 @@ public sealed class TranslationClient : IDisposable
                 {
                     if (!response.IsSuccessStatusCode)
                     {
-                        if (attempt == 0 && IsTransient(response.StatusCode))
+                        if (canRetry && IsTransient(response.StatusCode))
                         {
                             var delay = response.Headers.RetryAfter?.Delta ?? TimeSpan.FromMilliseconds(300);
                             delay = TimeSpan.FromMilliseconds(Math.Clamp(delay.TotalMilliseconds, 100, 3000));
@@ -224,7 +228,6 @@ public sealed class TranslationClient : IDisposable
                     return result;
                 }
             }
-            throw new InvalidOperationException("AI 服务暂时不可用，请稍后重试。");
         }
         catch (OperationCanceledException) when (!token.IsCancellationRequested)
         {

@@ -93,12 +93,12 @@ public static class RecognitionModeUiTests
                 break;
             case "Handwriting":
                 Check(note.Contains("截图", StringComparison.Ordinal)
-                    && note.Contains("原文", StringComparison.Ordinal)
-                    && note.Contains("翻译", StringComparison.Ordinal)
+                    && note.Contains("一次请求直接返回译文", StringComparison.Ordinal)
+                    && note.Contains("核对原文", StringComparison.Ordinal)
                     && note.Contains("仅识别手写（AI）", StringComparison.Ordinal)
                     && note.Contains("定位", StringComparison.Ordinal)
                     && note.Contains("不进行翻译", StringComparison.Ordinal),
-                    "Handwriting disclosure separates image recognition from text translation");
+                    "Handwriting disclosure distinguishes direct screenshot translation and explicit source reading");
                 break;
             case "Ocr":
                 Check(note.Contains("本机识别", StringComparison.Ordinal)

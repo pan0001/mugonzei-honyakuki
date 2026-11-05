@@ -187,7 +187,7 @@ internal sealed partial class MainForm
         var test = Flow(); test.Controls.AddRange([checkApiVision, Note("使用内置测试图，不截取游戏画面")]);
         SettingRow(apiSettingsCard, "连接测试", test);
         SettingRow(apiSettingsCard, "", apiTestResult);
-        var info = SettingsCard(stack, "数据与输出", "手写 OCR 先转写再翻译；直接识图由模型组织结果");
+        var info = SettingsCard(stack, "数据与输出", "视觉模型直接返回截图译文；本地 OCR 可同时显示原文");
         SettingRow(info, "", dataNote, fullWidth: true);
         var more = Flow();
         var local = Button("使用本机 Ollama");
@@ -299,7 +299,7 @@ internal sealed partial class MainForm
         apiKey.PlaceholderText = "本机 Ollama 可留空；保存时使用 Windows 加密";
         backend.Items.AddRange(["本机 Codex", "其他 AI API", "Google Translate（后台网页）", "积分服务（爱发电）"]);
         backend.SelectedIndexChanged += (_, _) => UpdateBackendControls();
-        processingMode.Items.AddRange(["本地OCR（不推荐）", "直接发送截图给模型", "手写体 OCR（AI）→ 翻译", "本地日语手写 OCR → 翻译"]);
+        processingMode.Items.AddRange(["本地OCR（不推荐）", "直接发送截图给模型", "手写截图直译（AI）", "本地日语手写 OCR → 翻译"]);
         processingMode.SelectedIndexChanged += (_, _) => UpdateBackendControls();
         codexPath.PlaceholderText = "留空自动查找，或填写 codex.exe 的完整路径";
         codexModel.PlaceholderText = "留空使用 Codex 默认模型";

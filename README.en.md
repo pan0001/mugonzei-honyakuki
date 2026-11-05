@@ -8,7 +8,7 @@
 
 Translate handwritten or printed text on a Windows desktop or in SteamVR, with subtitles near the bottom of the monitor or headset view.
 
-[Windows x64 installer · v0.2.7-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.7-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.7-preview.exe) · [Portable ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.7-preview/Mugonzei-Honyakuki-win-x64-v0.2.7-preview.zip) · [Report an issue](https://github.com/pan0001/mugonzei-honyakuki/issues)
+[Windows x64 installer · v0.2.8-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.8-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.8-preview.exe) · [Portable ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.8-preview/Mugonzei-Honyakuki-win-x64-v0.2.8-preview.zip) · [Report an issue](https://github.com/pan0001/mugonzei-honyakuki/issues)
 
 **Example: translating a station sign into Simplified Chinese**
 
@@ -22,7 +22,7 @@ Translate handwritten or printed text on a Windows desktop or in SteamVR, with s
 
 - **Controller capture:** hold the left X button for 1.5 seconds to trigger a capture. A ring below your view shows progress. Continue holding until 3 seconds to cancel the current task and hide the subtitles.
 - **Subtitle overlay:** a wide, low-profile translucent bar with pagination, optional source text, and adjustable position, width, and display duration.
-- **AI handwriting recognition:** automatically locate writing, crop and enlarge details from the original image, read them alongside the full image, then translate. Intended for Chinese, Japanese, English, and mixed text, without manual region selection.
+- **AI handwriting translation:** send one screenshot to translate Chinese, Japanese or English handwriting directly. With your own AI service, you can also request a separate transcription to check the writing.
 - **Direct image analysis:** game screenshots prioritize dialogue, handwriting, signs and quest text. Web pages and documents keep their main text. The translator asks the model to ignore performance overlays, hotkey hints, OSC controls and the taskbar, and collapses duplicate subtitles.
 - **Local OCR:** Tesseract for printed text and a separate NDLOCR-Lite engine for Japanese recognition. The recognition stage can run locally.
 - **Multiple translation services:** an existing Codex login, cloud or local OpenAI-compatible APIs, and a background Google Translate webpage.
@@ -34,7 +34,7 @@ Translate handwritten or printed text on a Windows desktop or in SteamVR, with s
 
 - Windows x64. Desktop mode requires no SteamVR or headset. VR mode requires a compatible headset and controllers.
 - Codex mode: an installed Codex CLI with an active login. It calls an online model; inference is not offline.
-- Other AI APIs: an available compatible service. Image analysis requires image input support, and AI handwriting mode also requires support for multiple images in one request.
+- Other AI APIs: screenshot translation requires image input. Multiple images per request are only needed for the separate detailed transcription with your own AI service.
 - The embedded interface requires the [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/). It loads from the installed files. Google Translate also requires internet access.
 - Both the installer and the portable ZIP include the .NET runtime, Tesseract language models, and the local Japanese OCR runtime. Building from source requires the .NET 10 SDK and an internet connection when preparing dependencies for the first time.
 
@@ -76,10 +76,10 @@ Further changes are delivered through incremental commits and released under new
 | --- | --- | --- |
 | 本地OCR（不推荐） (Local OCR, not recommended) | Tesseract recognition, followed by text translation | Recognition stays on your computer; only the source text is sent to the translation service |
 | 直接发送截图给模型 (Send Screenshot Directly to Model) | A vision model reads and translates the image, choosing its own output format | The screenshot is sent to the selected Codex / API service |
-| 手写体 OCR（AI）→ 翻译 (AI Handwriting OCR → Translation) | Automatic region detection → reading enlarged details → translation | The full image and detail images are sent to the selected Codex / API service |
+| 手写截图直译（AI） (AI handwriting translation) | Translate handwriting directly in one model request | One screenshot goes to the selected provider; only the translation is returned |
 | 本地日语手写 OCR → 翻译 (Local Japanese Handwriting OCR → Translation) | Local NDLOCR-Lite recognition, followed by text translation | Recognition stays on your computer; only the source text is sent to the translation service |
 
-AI handwriting recognition usually makes two vision requests, with one additional text request for translation. It therefore takes more time and usage than a single direct image request. Enlarging an image cannot restore strokes that are blurred, obscured, or missing from the original. NDLOCR-Lite's Japanese recognition capability does not mean it can correctly recognize all mixed Chinese, Japanese, and English handwriting.
+Capture and Translate sends a single model request in both direct image and AI handwriting modes. For source text alongside a translation, use local OCR. The separate transcription action with your own AI can locate and enlarge writing and may use multiple requests. Enlargement cannot recover missing or obscured strokes.
 
 ## Configuring a translation service
 
@@ -97,7 +97,7 @@ If you host the service with Alibaba Cloud DirectMail, check the primary account
 
 If the operator provides a redemption code, enter it in the website account center or the desktop 「积分服务 → 打开积分服务 → 账户」 (Credit Service → Open Credit Service → Account), then click 「兑换」 (Redeem). Both use the same balance for the same account and service. Every account can claim a shared promotion code once. A single-use voucher can be claimed by just one account. Retrying a code you already claimed never adds credits again. The desktop app does not save codes; successful redemptions appear as 「兑换码入账」 in the ledger. Redeeming credits does not change translation service availability; check the status shown in the client.
 
-- One complete successful task costs **one credit**, including all recognition and translation stages. Image/handwriting mode transcribes Chinese, Japanese, or English before translating, and does not generate scene descriptions for text-free images. Local OCR modes only send recognized text.
+- One complete successful task costs **one credit**. Image and AI handwriting modes return only the translation in a single model request. Local OCR sends only the recognized text and can display the original alongside the translation.
 - A screenshot containing only recognized interface clutter is treated as having no main text. No text, failure, or cancellation before server completion costs nothing. Hiding a completed result does not refund it. Repeatedly querying the same task does not charge again; use the account window to recover the latest task after a disconnect.
 - Afdian notifications trigger an authenticated server-side order query before crediting. Orders are credited once; mismatched amount, plan, or account association is rejected.
 - Local recognition-only remains free. AI recognition-only is available through your own Codex/API, not the credit service. Existing providers and settings are preserved.
@@ -115,7 +115,7 @@ See the [deployment guide](server/deploy/README.md) for initial Linux / systemd 
 
 The app uses the Codex CLI's existing login; you do not need to enter an API key here. Leave the executable path blank for automatic detection. Leave the model blank to use the CLI's default selection. The app does not inherit the model setting from your personal `config.toml` or continue an existing chat.
 
-To use Codex for image recognition, set 「识图方式」 (Image Recognition Mode) to 「直接发送截图给模型」 (Send Screenshot Directly to Model) or 「手写体 OCR（AI）→ 翻译」 (AI Handwriting OCR → Translation). To specify a model, you can enter `gpt-6.1-terra`, subject to the models actually available to your account.
+To use Codex for image recognition, set 「识图方式」 (Image Recognition Mode) to 「直接发送截图给模型」 (Send Screenshot Directly to Model) or 「手写截图直译（AI）」 (Direct AI handwriting translation). To specify a model, you can enter `gpt-6.1-terra`, subject to the models actually available to your account.
 
 「思考程度」 (Reasoning Effort) supports 「自动（按阶段）」 (Automatic by Stage), `low`, `medium`, and `high`. Automatic uses low for direct image analysis and text translation, medium for locating handwriting, and high for reading multiple views in detail. An explicit selection overrides every Codex recognition and translation stage. Save changes before using them. Calls count toward your account usage; account permissions, limits, and network conditions affect availability.
 

@@ -121,7 +121,7 @@ public sealed class TranslationService : BackgroundService
                     cancellation.Token.ThrowIfCancellationRequested();
                     var result = await processor.ProcessAsync(pending.Input, cancellation.Token);
                     cancellation.Token.ThrowIfCancellationRequested();
-                    result.Validate();
+                    result.Validate(pending.Input.Mode);
                     store.CompleteTranslation(pending.UserId, pending.Id,
                         JsonSerializer.Serialize(result, TranslationInput.Json), charge: !result.NoText);
                 }

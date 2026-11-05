@@ -333,34 +333,37 @@ internal static partial class Program
 
     private static async Task ProcessorTransport()
     {
-        const string source = "あした学校へ\nhello 中文 [无法辨认]";
-        var handler = new ReplyHandler([
-            Envelope(JsonSerializer.Serialize(new { status = "text", sourceText = source })),
-            Envelope(JsonSerializer.Serialize(new { translation = "明天去学校\n你好 中文 [无法辨认]" }))]);
+        const string translation = "明天去学校\n你好 中文 [无法辨认]";
+        var handler = new ReplyHandler([Envelope(JsonSerializer.Serialize(new { status = "text", translation }))]);
         using var http = new HttpClient(handler);
         using var processor = new TranslationProcessor(Options(), http);
         var input = TranslationInput.Validate(new("handwriting", null, Pixel, "简体中文"));
         var result = await processor.ProcessAsync(input, default);
-        Equal(source, result.SourceText, "Mixed-language transcription is retained verbatim");
-        Check(result.Translation.Contains("[无法辨认]", StringComparison.Ordinal), "Uncertainty markers survive translation");
-        Equal(2, handler.Bodies.Count, "Image reading and text translation use two stages for one task");
-        using var first = JsonDocument.Parse(handler.Bodies[0]); using var second = JsonDocument.Parse(handler.Bodies[1]);
+        Equal("", result.SourceText, "An image translation never invents a source transcript");
+        Equal(translation, result.Translation, "The single image call returns the translation with uncertainty markers");
+        Equal(1, handler.Bodies.Count, "Handwriting uses one multimodal request");
+        using var first = JsonDocument.Parse(handler.Bodies.Single());
         Equal("server-only-model", first.RootElement.GetProperty("model").GetString(), "The model comes from server configuration");
         Equal("Bearer synthetic-server-key", handler.Authorization.Single(), "Only server credentials authenticate the upstream");
-        Check(!handler.Bodies[1].Contains(Pixel, StringComparison.Ordinal), "The translation stage does not resend the image");
+        var parts = first.RootElement.GetProperty("messages")[1].GetProperty("content");
+        using var instructionData = JsonDocument.Parse(parts[0].GetProperty("text").GetString()!);
+        Equal("简体中文", instructionData.RootElement.GetProperty("targetLanguage").GetString(), "Target language accompanies the image as data");
+        Equal("data:image/png;base64," + Pixel, parts[1].GetProperty("image_url").GetProperty("url").GetString(), "The same request contains the original image");
         Check(handler.Uris.All(uri => uri == "https://upstream.invalid/v1/chat/completions"), "The client cannot choose the upstream destination");
-        foreach (string output in new[] { "A person is standing in a room.", "{\"status\":\"scene\",\"sourceText\":\"a room\"}",
-            "{\"status\":\"no_text\",\"sourceText\":\"invented\"}", "{\"status\":\"text\",\"sourceText\":\"\"}",
-            "{\"status\":\"text\",\"sourceText\":\"x\",\"extra\":true}" })
+        foreach (string output in new[] { "A person is standing in a room.", "{\"status\":\"scene\",\"translation\":\"a room\"}",
+            "{\"status\":\"no_text\",\"translation\":\"invented\"}", "{\"status\":\"text\",\"translation\":\"\"}",
+            "{\"status\":\"text\",\"sourceText\":\"transcript only\"}", "{\"status\":\"text\",\"translation\":\"x\",\"extra\":true}" })
         {
-            using var invalidHttp = new HttpClient(new ReplyHandler([Envelope(output)]));
+            var invalidHandler = new ReplyHandler([Envelope(output)]);
+            using var invalidHttp = new HttpClient(invalidHandler);
             using var invalid = new TranslationProcessor(Options(), invalidHttp);
             await ThrowsProcessing(() => invalid.ProcessAsync(input, default));
+            Equal(1, invalidHandler.Bodies.Count, "Malformed image results are not retried or sent to a second model call");
         }
-        var noTextHandler = new ReplyHandler([Envelope("{\"status\":\"no_text\",\"sourceText\":\"\"}")]);
+        var noTextHandler = new ReplyHandler([Envelope("{\"status\":\"no_text\",\"translation\":\"\"}")]);
         using var noTextHttp = new HttpClient(noTextHandler); using var noTextProcessor = new TranslationProcessor(Options(), noTextHttp);
         Check((await noTextProcessor.ProcessAsync(input, default)).NoText, "Structured no_text is recognized explicitly");
-        Equal(1, noTextHandler.Bodies.Count, "A no-text image does not enter translation");
+        Equal(1, noTextHandler.Bodies.Count, "A no-text image makes one model request");
         using var truncatedHttp = new HttpClient(new ReplyHandler([Envelope("{\"translation\":\"partial\"}", "length")]));
         using var truncated = new TranslationProcessor(Options(), truncatedHttp);
         await ThrowsProcessing(() => truncated.ProcessAsync(TextInput("source"), default));

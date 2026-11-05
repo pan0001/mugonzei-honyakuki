@@ -10,7 +10,7 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
     <AssemblyName>SteamVrTranslator</AssemblyName>
-    <Version>0.2.7-preview</Version>
+    <Version>0.2.8-preview</Version>
     <Product>无言势翻译器 · Mugonzei Honyakuki</Product>
     <Description>SteamVR screenshot, handwriting recognition and translation overlay.</Description>
     <ApplicationManifest>app.manifest</ApplicationManifest>

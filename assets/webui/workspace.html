@@ -91,7 +91,7 @@
             <div role="tabpanel" id="prefsPanel" aria-labelledby="prefsTab" hidden>
             <section class="card form-card"><div class="card-head"><h2>服务与语言</h2><button type="button" class="quiet" data-action="setup">配置向导</button></div>
               <div class="fields"><label class="field">翻译服务<select data-field="translationBackend"><option value="Credits">账号积分服务</option><option value="OpenAI">自己的 API</option><option value="Codex">本机 Codex</option><option value="GoogleTranslate">Google 翻译</option></select></label>
-                <label class="field">识图方式<select data-field="processingMode"><option value="Handwriting">AI 手写识别</option><option value="Image">直接发送截图给模型</option><option value="LocalJapanese">本地日语手写 OCR</option><option value="Ocr">本地OCR（不推荐）</option></select></label>
+                <label class="field">识图方式<select data-field="processingMode"><option value="Handwriting">手写截图直译（AI）</option><option value="Image">直接发送截图给模型</option><option value="LocalJapanese">本地日语手写 OCR</option><option value="Ocr">本地OCR（不推荐）</option></select></label>
                 <label class="field">目标语言<input data-field="targetLanguage" maxlength="100" required></label>
               </div><p class="hint" id="privacyHint"></p><p class="hint" id="localOcrStatus" hidden></p>
             </section>

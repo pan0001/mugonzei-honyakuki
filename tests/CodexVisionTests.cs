@@ -20,7 +20,8 @@ public static class CodexVisionTests
     public static async Task RunAsync()
     {
         byte[] png = Fixture();
-        await AttachmentAndPromptAsync(png);
+        await AttachmentAndPromptAsync(png, "Image");
+        await AttachmentAndPromptAsync(png, "Handwriting");
         await ImageAndTextScopeAsync(png);
         await HandwritingAttachmentAndPromptAsync(png);
         await HandwritingRoundTripPreservesSourceAsync(png);
@@ -107,11 +108,12 @@ public static class CodexVisionTests
         return result;
     }
 
-    private static async Task AttachmentAndPromptAsync(byte[] png)
+    private static async Task AttachmentAndPromptAsync(byte[] png, string mode)
     {
         string? work = null, imagePath = null;
         int calls = 0;
         var settings = Config();
+        settings.ProcessingMode = mode;
         var client = new CodexTranslationClient(async (start, prompt, token) =>
         {
             calls++;
@@ -132,7 +134,10 @@ public static class CodexVisionTests
             Equal("", start.Arguments, "ArgumentList avoids shell quoting");
             Check(!start.ArgumentList.Any(arg => arg.Contains("must-not-reach-image-cli")), "API key not passed to Codex");
             var visionConfigs = ConfigArguments(start);
-            Equal(VisionPrompt.Instructions, visionConfigs["developer_instructions"].GetString(), "Vision instructions replace OCR-only instructions");
+            string instructions = visionConfigs["developer_instructions"].GetString()!;
+            Equal(VisionPrompt.TranslationInstructions(settings), instructions, "Vision instructions replace OCR-only instructions");
+            Check(instructions.Contains("only the translation") && (mode != "Handwriting" || instructions.Contains("small kana")),
+                "Codex directly requests the final translation with handwriting guidance when selected");
             var textConfigs = ConfigArguments(CodexTranslationClient.CreateTranslationStartInfo(start.FileName, work, settings.CodexModel));
             foreach (var entry in textConfigs.Where(entry => entry.Key != "developer_instructions"))
                 Equal(entry.Value.GetRawText(), visionConfigs[entry.Key].GetRawText(), "Text-route security retained: " + entry.Key);

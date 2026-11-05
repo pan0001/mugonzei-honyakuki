@@ -233,10 +233,10 @@ internal sealed partial class MainForm : Form
         bool localJapanese = processingMode.SelectedIndex == 3;
         localOcrSettingsCard.Visible = localJapanese;
         if (localJapanese) localOcrStatus.Text = LocalJapaneseOcrService.GetAvailabilityMessage();
-        showSource.Enabled = !directImage;
+        showSource.Enabled = !(directImage || handwriting);
         dataNote.Text = useCredits
             ? (directImage || handwriting
-                ? "截图将发送给积分服务，由服务端识别中、日、英文字并翻译。服务使用的模型由运营者配置。"
+                ? "截图将发送给积分服务，视觉模型一次读取画面并直接返回译文。截图翻译只显示译文。"
                 : "图片在本机识别，只有识别原文发送给积分服务进行翻译。")
                 + "\n完整翻译成功扣 1 积分；无文字、失败或服务端完成前取消不扣。重复查询同一任务不会重复扣分。"
                 + "\n服务端已完成后隐藏字幕不会退回积分；断线时可在「账号与积分」找回最近结果。"
@@ -253,11 +253,10 @@ internal sealed partial class MainForm : Form
                 + "\n截图仅临时写入本机，识别后删除；程序不自动保存截图或翻译历史。"
             : handwriting
             ? (useCodex
-                ? "手写体 OCR：截图发给 Codex 定位字迹，再放大局部识别原文，最后翻译；这三步计入账号用量。"
-                : "手写体 OCR：所选视觉 API 先定位字迹，再结合整图和局部放大图识别，最后翻译。支持本机服务；模型需支持多张图片。")
-                + "\n自动识别中、日、英混合内容；看不清的字标为 [无法辨认]，结果仍需核对。"
-                + "\n手写识别优先保留原图细节，并在桌面显示识别原文供核对。"
-                + "\n「仅识别手写（AI）」只做定位与原文识别，不进行翻译。可手动保存当前截图；程序不自动记录历史。"
+                ? "手写翻译：截图发给 Codex，一次请求直接返回译文，计入账号用量。"
+                : "手写翻译：截图发给所选视觉 API，一次请求直接返回译文。支持本机视觉模型。")
+                + "\n保留中、日、英混合手写的笔画细节，模糊处会标记为 [无法辨认]。"
+                + "\n要核对原文，请用「仅识别手写（AI）」：先定位字迹，再结合放大图识别原文，不进行翻译。"
             : directImage
             ? useCodex
                 ? "裁剪后的截图会发送给已登录的 Codex 模型，计入账号用量；不经过本地 OCR。\n「仅识别原文（AI）」也会发送截图，只返回原文。截图临时文件在请求结束后删除；程序不保存翻译历史。"
@@ -605,18 +604,19 @@ internal sealed partial class MainForm : Form
             captured = true;
             imageBox.Text = $"截图 #{number} · {request.CapturedAt ?? DateTime.Now:HH:mm:ss.fff} · {request.Source} · {cropped.Width} × {cropped.Height}";
             imageBox.Refresh();
-            if (!ocrOnly && settings.TranslationBackend == "Credits" && settings.ProcessingMode is "Image" or "Handwriting")
+            if (!ocrOnly && settings.ProcessingMode is "Image" or "Handwriting")
             {
-                byte[] png = await Task.Run(() => VisionImage.PrepareForRecognition(cropped), token);
-                await RunCreditTranslationAsync(request, started, null, png, token);
-                return;
-            }
-            if (!ocrOnly && settings.ProcessingMode == "Image")
-            {
-                sourceHint = "直接识图不单独返回原文，请查看上方的翻译结果。";
+                sourceHint = "截图翻译只返回译文。需要原文时，请使用仅识别功能。";
+                byte[] png = await Task.Run(() => settings.ProcessingMode == "Handwriting" || settings.TranslationBackend == "Credits"
+                    ? VisionImage.PrepareForRecognition(cropped) : VisionImage.Prepare(cropped), token);
+                if (settings.TranslationBackend == "Credits")
+                {
+                    sourceHint = "积分服务的截图翻译只返回译文。";
+                    await RunCreditTranslationAsync(request, started, null, png, token);
+                    return;
+                }
                 SetStatus(settings.TranslationBackend == "Codex" ? "正在将截图交给 Codex 直接识图…" : "正在将截图交给兼容 API 的视觉模型…");
-                ShowStatus("正在直接识图…");
-                byte[] png = await Task.Run(() => VisionImage.Prepare(cropped), token);
+                ShowStatus("正在翻译截图…");
                 var result = await translator.AnalyzeImageAsync(png, settings, token);
                 token.ThrowIfCancellationRequested();
                 if (string.IsNullOrWhiteSpace(result))
@@ -630,7 +630,7 @@ internal sealed partial class MainForm : Form
             }
             bool localJapanese = settings.ProcessingMode == "LocalJapanese";
             bool handwriting = settings.ProcessingMode is "Handwriting" or "LocalJapanese";
-            bool aiTranscription = settings.ProcessingMode == "Handwriting" || (ocrOnly && settings.ProcessingMode == "Image");
+            bool aiTranscription = ocrOnly && settings.ProcessingMode is "Handwriting" or "Image";
             string text;
             if (localJapanese)
             {

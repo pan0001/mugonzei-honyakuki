@@ -84,12 +84,13 @@ public sealed record TranslationInput(string Mode, string? Text, byte[]? Image, 
 public sealed record TranslationResult(bool NoText, string SourceText, string Translation)
 {
     public const int MaxOutputCharacters = 32_000;
-    public void Validate()
+    public void Validate(string mode)
     {
+        bool imageWithoutTranscript = mode is "image" or "handwriting" && SourceText == "";
         if (SourceText is null || Translation is null || SourceText.Length > TranslationInput.MaxTextCharacters
             || Translation.Length > MaxOutputCharacters
             || (NoText ? SourceText.Length != 0 || Translation.Length != 0
-                : string.IsNullOrWhiteSpace(SourceText) || string.IsNullOrWhiteSpace(Translation)))
+                : (!imageWithoutTranscript && string.IsNullOrWhiteSpace(SourceText)) || string.IsNullOrWhiteSpace(Translation)))
             throw new TranslationProcessingException("invalid_model_output");
     }
 }

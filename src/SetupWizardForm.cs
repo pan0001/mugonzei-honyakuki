@@ -278,7 +278,7 @@ internal sealed class SetupWizardForm : Form
 
     private void InitializeChoices()
     {
-        processingMode.Items.AddRange(["本地OCR（不推荐）", "直接发送截图给模型", "手写体 OCR（AI）→ 翻译", "本地日语手写 OCR → 翻译"]);
+        processingMode.Items.AddRange(["本地OCR（不推荐）", "直接发送截图给模型", "手写截图直译（AI）", "本地日语手写 OCR → 翻译"]);
         codexReasoning.Items.AddRange(["自动（按阶段）", "low", "medium", "high"]);
         apiPreset.Items.AddRange(ApiProviderPresets.All.Select(preset => (object)preset.Name).ToArray());
         apiImageDetail.Items.AddRange(["服务默认", "高清", "低清", "自动"]);
@@ -383,7 +383,7 @@ internal sealed class SetupWizardForm : Form
         Row(apiCard, "API 密钥", apiKey);
         Row(apiCard, "图片精度", apiImageDetail);
         Row(apiCard, "返回方式", apiStream);
-        Row(apiCard, "", Note("地址填写 Base URL 或完整 /chat/completions 路径。\n本机服务未启用鉴权时可留空密钥；云端服务需要对应密钥。AI 手写识别还需模型支持多图输入。这里仅保存配置，不发送测试图片。"), true);
+        Row(apiCard, "", Note("地址填写 Base URL 或完整 /chat/completions 路径。\n本机服务未启用鉴权时可留空密钥；云端服务需要对应密钥。截图翻译需要支持图片输入，手写原文精读需要支持多图。这里仅保存配置。"), true);
 
         googleCard = Card(page, "Google Translate 后台网页", "适合先在本机识别，再翻译原文");
         Row(googleCard, "", Note("无需 API 密钥。程序在独立 WebView2 网页中输入识别文字、读取译文，不抢占桌面鼠标。\n图片留在本机，只有识别原文发送给 Google Translate。\n需要网络和 WebView2 Runtime；网页验证、限流或页面变化可能使翻译暂时不可用。\n此服务不识别图片，请使用本地 OCR 或本地日语手写 OCR。"), true);
@@ -457,12 +457,12 @@ internal sealed class SetupWizardForm : Form
             : SelectedMode switch
             {
                 "Image" => "直接识图：发送截图，由视觉模型组织翻译内容。",
-                "Handwriting" => "AI 手写：自动定位字迹，结合放大图读取原文，再翻译。需要多次请求，等待和用量通常更多。",
+                "Handwriting" => "AI 手写：发送一张保留笔画细节的截图，一次请求直接返回译文。核对原文可单独选择「仅识别手写（AI）」。",
                 "LocalJapanese" => "本地日语 OCR：使用 NDLOCR-Lite 在电脑上识别日文。复杂手写仍可能误读，请核对原文。",
                 _ => "本地 OCR：使用 Tesseract 识别印刷文字，再发送原文翻译。潦草手写建议尝试 AI 手写识别。"
             };
         if (SelectedBackend == "Credits") modeNote.Text = SelectedMode is "Image" or "Handwriting"
-            ? "积分服务在服务器识别原文，再翻译。整张图成功扣 1 分；无字、失败或完成前取消不扣。"
+            ? "积分服务一次请求直接翻译截图。成功扣 1 分；无字、失败或完成前取消不扣。"
             : "先在本机识别，再把原文发给积分服务。成功翻译扣 1 分；仅本地识别不扣。";
         ClearError();
         RefreshSummary();

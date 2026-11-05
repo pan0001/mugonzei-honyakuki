@@ -10,6 +10,7 @@ public static class ApiVisionTests
     public static async Task RunAsync()
     {
         await ImagePayloadAsync();
+        await DesktopSinglePassAsync();
         await ImageAndTextScopeAsync();
         await FocusPayloadAsync();
         await FocusBoundsAndCancellationAsync();
@@ -31,6 +32,47 @@ public static class ApiVisionTests
         await StreamingInterruptedAndCancelledAsync(handwriting: true);
         Console.WriteLine("PASS: API vision PNG integrity, optional detail, bounded SSE, input/output bounds, failures, retry and cancellation");
     }
+
+    private static Task DesktopSinglePassAsync() => DesktopResponsivenessTests.OnUiThread(async () =>
+    {
+        using var server = new HandwritingLocalApiTests.LocalServer();
+        using var form = new MainForm(demo: true);
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        T Field<T>(string name) => (T)typeof(MainForm).GetField(name, flags)!.GetValue(form)!;
+        var run = typeof(MainForm).GetMethod("RunCaptureAsync", flags)!;
+        var settings = Field<AppSettings>("settings");
+        settings.TranslationBackend = "OpenAI"; settings.ApiBaseUrl = server.BaseUrl; settings.ApiKey = "";
+        settings.ApiModel = "synthetic-vision"; settings.TargetLanguage = "Japanese"; settings.ShowSource = true;
+        try
+        {
+            foreach (string mode in new[] { "Image", "Handwriting" })
+            {
+                settings.ProcessingMode = mode;
+                using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(6));
+                Field<TextBox>("sourceText").Text = "stale transcript";
+                var capture = (Task)run.Invoke(form, [new CaptureRequest(false, "synthetic", DesktopImage: new Bitmap(32, 16))])!;
+                var (context, document) = await server.ReceiveAsync(deadline.Token);
+                using (document)
+                {
+                    var messages = document.RootElement.GetProperty("messages");
+                    string instructions = messages[0].GetProperty("content").GetString()!;
+                    Check(instructions == VisionPrompt.TranslationInstructions(settings) && instructions.Contains("only the translation"),
+                        "The normal capture entry point directly requests a translation in both visual modes");
+                    Check(mode != "Handwriting" || instructions.Contains("small kana"), "Single-pass handwriting retains stroke-reading guidance");
+                    var content = messages[1].GetProperty("content");
+                    Check(content.GetArrayLength() == 2 && content[1].GetProperty("type").GetString() == "image_url"
+                        && content[0].GetProperty("text").GetString() == VisionPrompt.BuildRequest(settings),
+                        "One attached screenshot and the saved target language reach the selected service");
+                }
+                await server.RespondAsync(context, "合図を待って。", false, deadline.Token);
+                await capture.WaitAsync(deadline.Token); // A second location/transcribe/translate call has no responder.
+                Check(Field<TextBox>("translatedText").Text == "合図を待って。" && Field<TextBox>("sourceText").Text == ""
+                    && Field<List<Bitmap>>("pages").Count > 0, "Direct translation reaches subtitle pages without a fabricated or stale source");
+            }
+            Check(server.RequestCount == 2, "Two distinct screenshots issue exactly two model requests");
+        }
+        finally { typeof(MainForm).GetMethod("DisposeServices", flags)!.Invoke(form, null); }
+    });
 
     private static async Task ImageAndTextScopeAsync()
     {
@@ -228,8 +270,16 @@ public static class ApiVisionTests
             return Response(Success("Recovered"));
         }));
         using var client = new TranslationClient(http);
-        Check(await client.AnalyzeImageAsync(Png(), Config(), default) == "Recovered", "Shared transient retry succeeds");
-        Check(calls == 2, "Single retry");
+        await ThrowsAsync<InvalidOperationException>(() => client.AnalyzeImageAsync(Png(), Config(), default), "503");
+        Check(calls == 1, "A direct screenshot is never automatically resubmitted after a transient response");
+        calls = 0;
+        Check(await client.RecognizeHandwritingAsync(Png(), Config(), default) == "Recovered" && calls == 2,
+            "Explicit source recognition preserves the existing transient retry");
+        int disconnected = 0;
+        using var brokenHttp = new HttpClient(new Handler((_, _) => { disconnected++; throw new HttpRequestException("synthetic disconnect"); }));
+        using var broken = new TranslationClient(brokenHttp);
+        await ThrowsAsync<InvalidOperationException>(() => broken.AnalyzeImageAsync(Png(), Config(), default), "无法连接");
+        Check(disconnected == 1, "A lost response cannot silently resubmit the same screenshot");
 
         foreach (var sample in new[]
         {
@@ -318,8 +368,8 @@ public static class ApiVisionTests
         using var retryHttp = new HttpClient(new Handler((_, _) => Task.FromResult(++retryCalls == 1
             ? Response("temporary", HttpStatusCode.ServiceUnavailable) : StreamResponse(CompleteStream("Recovered stream")))));
         using var retryClient = new TranslationClient(retryHttp);
-        Check(await retryClient.AnalyzeImageAsync(Png(), fallback, default) == "Recovered stream" && retryCalls == 2,
-            "Streaming uses the same single transient status retry");
+        await ThrowsAsync<InvalidOperationException>(() => retryClient.AnalyzeImageAsync(Png(), fallback, default), "503");
+        Check(retryCalls == 1, "Streaming screenshot translation also fails after a single submission");
     }
 
     private static async Task StreamingFailuresAsync(bool handwriting = false)

@@ -216,7 +216,8 @@
     }
     const destination = {OpenAI:"你配置的 API", Credits:"积分服务器及其 AI 服务", Codex:"本机 Codex 配置的模型", GoogleTranslate:"Google 翻译"}[provider] || "所选翻译服务";
     const sendsImage = recognition === "Image" || recognition === "Handwriting";
-    text(byId("privacyHint"), sendsImage ? "截图会发送给" + destination + "。" : "图片在本机识别，原文会发送给" + destination + "。");
+    text(byId("privacyHint"), sendsImage ? "截图会发送给" + destination + "，一次请求直接返回译文。" : "图片在本机识别，原文会发送给" + destination + "。");
+    disableWithReason(fields.get("showSource"), sendsImage, "本地 OCR 翻译可同时显示原文；截图直译只返回译文");
     optionalText("localOcrStatus", recognition === "LocalJapanese" ? state.localOcrStatus : "");
     display(byId("selectionDistanceField"), Boolean(current("spatialSelectionEnabled")));
     text(byId("controllerHelp"), current("spatialSelectionEnabled")

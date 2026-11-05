@@ -61,7 +61,7 @@ public static class UiLayoutTests
                     mode.SelectedIndex = 2;
                     Settle(form);
                     Check(form.HasPendingAiSettings, "An unapplied handwriting mode must prevent AI requests");
-                    Check(showSource.Enabled, "Handwriting mode permits source-text display");
+                    Check(!showSource.Enabled, "Direct handwriting translation only returns a translation");
                     Check(recognize.Text == "仅截屏识别", "A handwriting draft must not change the active local recognition action");
                     CheckHandwritingDisclosure(form, "Codex");
                     aiScroll.AutoScrollPosition = Point.Empty;
@@ -69,7 +69,7 @@ public static class UiLayoutTests
                     backend.SelectedIndex = 1;
                     Settle(form);
                     CheckHandwritingDisclosure(form, "API");
-                    Check(showSource.Enabled && form.HasPendingAiSettings, "Handwriting with a visual API keeps source output and the unsaved guard");
+                    Check(!showSource.Enabled && form.HasPendingAiSettings, "Direct API handwriting keeps the unsaved guard");
                     Check(recognize.Text == "仅截屏识别", "Changing a draft AI provider does not enable AI-only recognition");
                     backend.SelectedIndex = 0;
                     mode.SelectedIndex = savedMode;
@@ -183,8 +183,8 @@ public static class UiLayoutTests
         string note = Field<Label>(form, "dataNote").Text;
         Check(note.Contains("截图", StringComparison.Ordinal) && note.Contains(backend, StringComparison.Ordinal),
             "Handwriting disclosure identifies the screenshot destination: " + backend);
-        Check(note.Contains("原文", StringComparison.Ordinal) && note.Contains("识别", StringComparison.Ordinal)
-            && note.Contains("翻译", StringComparison.Ordinal), "Handwriting disclosure explains recognition of source text followed by translation");
+        Check(note.Contains("一次请求直接返回译文", StringComparison.Ordinal) && note.Contains("核对原文", StringComparison.Ordinal),
+            "Handwriting disclosure separates direct translation from inspecting the source");
         Check(note.Contains("仅识别", StringComparison.Ordinal) && note.Contains("AI", StringComparison.Ordinal),
             "Handwriting disclosure explicitly says recognition-only also uses AI");
     }
@@ -232,7 +232,7 @@ public static class UiLayoutTests
             Settle(form);
             Check(mode.SelectedIndex == 2 && !form.HasPendingAiSettings, "Applied handwriting settings map back to the third option");
             Check(recognize.Text == "仅识别手写（AI）", "Only an applied handwriting setting changes the active recognition action");
-            Check(showSource.Enabled, "Applied handwriting settings support displaying the recognized source");
+            Check(!showSource.Enabled, "Applied handwriting translation does not promise a source transcript");
             mode.SelectedIndex = 0;
             Check(form.HasPendingAiSettings, "A local-OCR draft remains unapplied while handwriting is active");
             Check(recognize.Text == "仅识别手写（AI）", "An unsaved local-OCR draft must not disguise the active AI recognition action");
@@ -240,7 +240,7 @@ public static class UiLayoutTests
             Check(form.HasPendingAiSettings && !showSource.Enabled, "Direct-image draft remains distinct from applied handwriting mode");
             Check(recognize.Text == "仅识别手写（AI）", "A direct-image draft cannot change the applied recognition action");
             mode.SelectedIndex = 2;
-            Check(!form.HasPendingAiSettings && showSource.Enabled, "Restoring applied handwriting clears the guard and restores source display");
+            Check(!form.HasPendingAiSettings && !showSource.Enabled, "Restoring direct handwriting translation clears the guard");
         }
         finally
         {
