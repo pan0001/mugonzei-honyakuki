@@ -73,7 +73,7 @@ $required = @(
     'Mugonzei.Server.dll', 'Mugonzei.Server.deps.json', 'Mugonzei.Server.runtimeconfig.json',
     'Microsoft.Data.Sqlite.dll', 'SQLitePCLRaw.batteries_v2.dll', 'SQLitePCLRaw.core.dll',
     'SQLitePCLRaw.provider.e_sqlite3.dll', 'libe_sqlite3.so',
-    'README.md', 'configuration.example.txt', 'licenses/Microsoft.Data.Sqlite-LICENSE.txt',
+    'README.md', 'ADMIN.md', 'COUPONS.md', 'configuration.example.txt', 'licenses/Microsoft.Data.Sqlite-LICENSE.txt',
     'deploy/README.md', 'deploy/mugonzei.service', 'deploy/server.env.example', 'deploy/build-sqlite-linux.py',
     'deploy/Caddyfile.example', 'deploy/caddy.service',
     'licenses/SQLitePCLRaw-LICENSE.txt', 'licenses/SQLite-native-LICENSE.txt'

@@ -48,13 +48,21 @@ public sealed partial class Store
     public IReadOnlyList<GeneratedRedemptionCode> CreateRedemptionCodes(int credits, int count,
         DateTimeOffset? expiresAt, string note)
     {
+        using var db = Open(); using var tx = db.BeginTransaction();
+        var result = CreateRedemptionCodes(db, tx, credits, count, expiresAt, note);
+        tx.Commit();
+        return result;
+    }
+
+    private static IReadOnlyList<GeneratedRedemptionCode> CreateRedemptionCodes(SqliteConnection db,
+        SqliteTransaction tx, int credits, int count, DateTimeOffset? expiresAt, string note)
+    {
         DateTimeOffset now = DateTimeOffset.UtcNow;
         if (credits is < 1 or > 1_000_000 || count is < 1 or > 1000 || note is null
             || note.Length > 120 || note.Any(char.IsControl)
             || expiresAt is { } expiry && (expiry <= now || expiry > now.AddYears(10)))
             throw new ApiException(400, "invalid_redemption_options", "积分须为 1–1000000，数量须为 1–1000；有效期须在未来十年内，备注最多 120 字且不得包含控制字符。");
         expiresAt = expiresAt?.ToUniversalTime();
-        using var db = Open(); using var tx = db.BeginTransaction();
         var result = new List<GeneratedRedemptionCode>(count);
         for (int index = 0; index < count; index++)
         {
@@ -69,7 +77,7 @@ public sealed partial class Store
                 ("$created", now.ToString("O", CultureInfo.InvariantCulture)), ("$note", note.Trim()));
             result.Add(new(id, code, credits, expiresAt));
         }
-        tx.Commit(); return result;
+        return result;
     }
 
     private sealed record CodeRow(string Id, int Credits, DateTimeOffset? ExpiresAt, DateTimeOffset CreatedAt,

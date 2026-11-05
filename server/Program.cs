@@ -71,6 +71,7 @@ public static class MugonzeiHost
             Policy("email-send", 5); Policy("auth", 10); Policy("payment", 20, true); Policy("webhook", 60); Policy("translation-submit", 20, true);
             Policy("redemption", 10, true);
             Policy("coupon-quote", 12, true);
+            Policy("admin-login", 5);
             Policy("translation-cancel", 60, true);
         });
 
@@ -208,6 +209,7 @@ public static class MugonzeiHost
             }).RequireRateLimiting("payment");
         }
         TranslationEndpoints.MapTranslationEndpoints(app);
+        AdminEndpoints.Map(app);
         await app.RunAsync();
     }
 

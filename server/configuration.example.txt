@@ -4,6 +4,9 @@ ASPNETCORE_ENVIRONMENT=Production
 ASPNETCORE_URLS=http://127.0.0.1:5187
 MUGONZEI_TRUSTED_PROXIES=
 MUGONZEI_DATABASE=/var/lib/mugonzei/mugonzei.db
+# Optional operator panel. Generate a dedicated random token and set the exact public HTTPS host.
+MUGONZEI_ADMIN_TOKEN=
+MUGONZEI_ADMIN_HOST=
 MUGONZEI_LIVE_PAYMENTS=false
 MUGONZEI_MOCK_PAYMENTS=false
 AFDIAN_USER_ID=

@@ -9,6 +9,10 @@ mugonzei.top {
 	handle /v1/* {
 		reverse_proxy 127.0.0.1:5187
 	}
+	@admin path /admin /admin/*
+	handle @admin {
+		reverse_proxy 127.0.0.1:5187
+	}
 	handle {
 		root * /opt/mugonzei/website/current
 		header {

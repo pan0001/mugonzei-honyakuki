@@ -12,6 +12,9 @@
     <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.53.3" />
     <Content Include="licenses/**/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="README.md;configuration.example.txt" CopyToPublishDirectory="PreserveNewest" />
+    <Content Include="ADMIN.md;COUPONS.md" CopyToPublishDirectory="PreserveNewest" />
+    <EmbeddedResource Include="../website/admin/index.html;../website/admin/admin.css;../website/admin/admin.js"
+                      LogicalName="Mugonzei.Admin.%(Filename)%(Extension)" />
     <Content Include="deploy/README.md;deploy/mugonzei.service;deploy/server.env.example;deploy/build-sqlite-linux.py;deploy/Caddyfile.example;deploy/caddy.service" CopyToPublishDirectory="PreserveNewest" />
     <Compile Remove="tests/**/*.cs" />
     <Content Remove="tests/**" />

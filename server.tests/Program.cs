@@ -25,6 +25,9 @@ internal static partial class Program
             await PaymentAccounting();
             await CouponTests();
             await CouponCheckoutHttpTests();
+            await AdminEndpointTests();
+            await AdminRedemptionTests();
+            await AdminPanelWorkflow();
             await PaymentVerification();
             RefundAccounting();
             await AuthenticationPersistence();

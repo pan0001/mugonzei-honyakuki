@@ -105,6 +105,8 @@ If the operator provides a redemption code, enter it in the website account cent
 
 To self-host, deploy the server separately and configure Afdian creator/developer access, actual plans, and an AI provider. Live payments are disabled by default. Local mock payments take no money and mock translation calls no real AI. See the [server guide](server/README.md) for deployment, APIs, tests, and refund operations. This implementation uses the official protocol independently; it incorporates no VRCLS or other AGPL project code.
 
+Operators can use the developer panel to view account counts, paid orders and their totals, manage payment coupons, and issue credit redemption codes in batches. Configure an operator token on the updated server and open `/admin/`. [Setup and local demo](server/ADMIN.md)
+
 See the [deployment guide](server/deploy/README.md) for initial Linux / systemd setup, SSH tunneling, and backups.
 
 ### Codex

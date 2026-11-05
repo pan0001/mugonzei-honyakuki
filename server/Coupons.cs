@@ -59,7 +59,7 @@ public sealed partial class Store
     }
 
     public IssuedCoupon CreateCoupon(IReadOnlyList<Plan> plans, string planId, int amountFen, string afdianPlanId,
-        DateTimeOffset? expiresAt = null, string? customCode = null)
+        DateTimeOffset? expiresAt = null, string? customCode = null, Guid? issuanceRequestId = null)
     {
         var plan = CheckoutPlan(plans, planId);
         if (amountFen < 1 || amountFen >= plan.AmountFen || afdianPlanId is not { Length: 32 } ||
@@ -76,6 +76,8 @@ public sealed partial class Store
         expiresAt = expiresAt?.ToUniversalTime();
         using var db = Open();
         using var tx = db.BeginTransaction();
+        if (issuanceRequestId is { } key && !ReserveAdminIssuance(db, tx, "coupon", key))
+            throw new ApiException(409, "coupon_issue_exists", "该创建请求已处理，请查看活动列表。优惠码仅在首次创建时显示。");
         RequireBaseProvider(db, tx, plan.AfdianPlanId);
         // Keep retired full-price provider IDs separate even after the operator removes their base plan.
         using (var wasBase = Command(db, tx, """

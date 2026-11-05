@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <title>积分管理 · 无言势翻译器</title>
+  <link rel="stylesheet" href="/admin/admin.css"><script defer src="/admin/admin.js"></script>
+</head>
+<body>
+<header><div class="wrap top"><div class="brand"><span class="mark" aria-hidden="true">無</span><span>无言势翻译器</span></div><button type="button" class="light" id="logout" hidden>退出管理</button></div></header>
+<main class="wrap">
+  <section id="login" class="login card">
+    <h1>管理登录</h1><p>输入服务器配置的管理员口令。</p>
+    <form id="loginForm" method="post" autocomplete="off">
+      <label for="token">管理员口令</label><input id="token" type="password" autocomplete="off" minlength="32" maxlength="256" spellcheck="false" required>
+      <button id="signIn" type="submit" disabled>登录后台</button>
+    </form>
+  </section>
+  <p id="notice" class="notice" role="status" aria-live="polite" tabindex="-1">正在检查管理会话…</p>
+  <div id="workspace" hidden>
+    <h1>积分管理</h1>
+    <dl class="overview" aria-label="运营概览"><div><dt>注册账户</dt><dd id="accounts">—</dd></div><div><dt>已付订单</dt><dd id="paidOrders">—</dd></div><div><dt>已付金额</dt><dd id="paidAmount">—</dd></div></dl>
+    <nav aria-label="管理内容"><button id="couponTab" aria-current="page" aria-controls="couponPage" type="button">优惠活动</button><button id="redemptionTab" aria-controls="redemptionPage" type="button">积分兑换码</button></nav>
+    <section id="couponPage" aria-labelledby="couponTab">
+      <section class="card"><h2>创建优惠活动</h2>
+        <p>先在爱发电建立独立的折扣方案，确保其单月价格与这里的折后价一致。</p>
+        <form id="couponForm" method="post" autocomplete="off">
+          <div class="grid">
+            <label>积分套餐<select id="plan" required></select><small id="planDetail"></small></label>
+            <label>折后价（元）<input id="price" type="text" inputmode="decimal" placeholder="例如 8.50" required maxlength="12"></label>
+            <label>爱发电折扣方案 ID<input id="providerPlan" required maxlength="32" pattern="[a-fA-F0-9]{32}" spellcheck="false" placeholder="32 位十六进制 ID"></label>
+            <label>有效期（天）<input id="couponDays" type="number" min="1" max="365" step="1" value="30" required></label>
+            <label>自定义优惠码（选填）<input id="customCode" type="text" maxlength="80" spellcheck="false" autocomplete="off" placeholder="留空则自动生成"><small>用 4–40 个英文字母或数字，可用短横线分隔，请避开 MU 开头。</small></label>
+          </div>
+          <button id="reviewCoupon" type="submit">核对活动</button>
+        </form>
+      </section>
+      <section class="card"><div class="row"><h2>已有优惠活动</h2><button id="refreshCoupons" type="button" class="light">刷新活动</button></div><div class="records" id="couponList"></div></section>
+    </section>
+    <section id="redemptionPage" aria-labelledby="redemptionTab" hidden>
+      <section class="card"><h2>生成积分兑换码</h2><p>每个码可兑换一次。生成后请及时抄存，历史列表只保留发放记录。</p>
+        <form id="redemptionForm" method="post" autocomplete="off"><div class="grid">
+          <label>每码积分<input id="credits" type="number" min="1" max="1000000" step="1" required></label>
+          <label>生成数量<input id="count" type="number" min="1" max="50" step="1" value="1" required></label>
+          <label>有效期（天）<input id="redemptionDays" type="number" min="1" max="365" step="1" value="30" required></label>
+          <label>批次备注（选填）<input id="note" maxlength="120" type="text" placeholder="例如 活动名称"></label>
+        </div><button type="submit">核对批次</button></form>
+      </section>
+      <section class="card"><div class="row"><h2>兑换码记录</h2><button id="refreshRedemptions" type="button" class="light">刷新记录</button></div><div class="records" id="redemptionList"></div></section>
+    </section>
+    <section class="card issued" id="issued" hidden aria-labelledby="issuedTitle">
+      <h2 id="issuedTitle" tabindex="-1"></h2><p>明文仅在这次生成后显示。请先抄存，再关闭。</p>
+      <label for="codes">生成的口令</label><textarea id="codes" readonly autocomplete="off" spellcheck="false" rows="4"></textarea>
+      <div class="actions"><button id="selectCodes" type="button" class="light">选中全部</button><button id="dismissCodes" type="button">已保存，关闭</button></div>
+    </section>
+  </div>
+</main>
+<dialog id="review" aria-labelledby="reviewTitle">
+  <h2 id="reviewTitle"></h2><dl id="summary"></dl>
+  <p id="reviewMessage" role="status" aria-live="polite"></p>
+  <div class="actions"><button type="button" id="confirm">确认</button><button type="button" id="back" class="light">返回</button></div>
+</dialog>
+</body></html>
