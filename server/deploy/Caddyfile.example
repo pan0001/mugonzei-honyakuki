@@ -1,0 +1,5 @@
+# Replace api.example.com with your public hostname before enabling Caddy.
+# Keep the backend and Caddy's default admin endpoint on loopback.
+api.example.com {
+	reverse_proxy 127.0.0.1:5187
+}

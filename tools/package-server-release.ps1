@@ -74,6 +74,7 @@ $required = @(
     'SQLitePCLRaw.provider.e_sqlite3.dll', 'libe_sqlite3.so',
     'README.md', 'configuration.example.txt', 'licenses/Microsoft.Data.Sqlite-LICENSE.txt',
     'deploy/README.md', 'deploy/mugonzei.service', 'deploy/server.env.example', 'deploy/build-sqlite-linux.py',
+    'deploy/Caddyfile.example', 'deploy/caddy.service',
     'licenses/SQLitePCLRaw-LICENSE.txt', 'licenses/SQLite-native-LICENSE.txt'
 )
 $files = [Collections.Generic.Dictionary[string, IO.FileInfo]]::new([StringComparer]::OrdinalIgnoreCase)

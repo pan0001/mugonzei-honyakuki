@@ -83,6 +83,54 @@ ssh -N -o ExitOnForwardFailure=yes -L 127.0.0.1:15187:127.0.0.1:5187 SSH_USER@YO
 
 桌面客户端的积分服务地址填写 `http://127.0.0.1:15187`。这只为运行隧道的电脑提供连接，不会启用支付或模型。账号会话按服务地址隔离，之后切换正式 HTTPS 地址需重新登录。公网服务应先配置域名、有效 HTTPS 证书与反向代理，再依照[服务端说明](../README.md)设置可信代理、爱发电计划与 AI。
 
+## 公网 HTTPS（Caddy）
+
+使用 [Caddyfile.example](Caddyfile.example) 与 [caddy.service](caddy.service) 为 API 子域名单独提供 HTTPS，不必占用根域名。模板的 `api.example.com` 是占位符，所有步骤都须替换成自己的域名。启用 HTTPS 不会开启爱发电或 AI；保留既有 `server.env` 中所有支付/模拟开关为 false、AI 地址和密钥为空、套餐为 `[]`。
+
+1. 创建子域名的 A 记录，指向服务器公网 IPv4；等待权威 DNS 和公共解析器均能查到。仅在服务器 IPv6 确实可达时添加 AAAA。不要删除其他用途的根域名记录。
+2. 放行云安全组及主机防火墙的 **TCP 80、443**，保持 **5187、2019 不对公网开放**。确保服务器能访问 DNS 和 ACME 服务。先让域名与端口就绪，再启动签发，避免反复失败触发 CA 限额。
+3. 从 [Caddy 官方安装入口](https://caddyserver.com/docs/install#static-binaries) 下载 Linux amd64 静态发行包，核对官方校验文件和来源；例如 2.11.8 的校验文件使用 SHA-512，应使用对应算法。保留发行包中的许可证。将二进制安装为 `/opt/mugonzei/caddy/caddy`（root:root、0755）；运行 `file`、`ldd` 和 `caddy version` 检查架构及链接方式，静态文件的 `ldd` 显示非动态可执行文件属于预期结果。无需在服务器配置 DNS 提供商的 API 密钥。
+
+首次安装时，以 root 从本 `deploy` 目录执行以下命令；已有用户或配置不要重复创建/覆盖。先安装二进制，复制配置后编辑占位域名，**验证成功后再启用服务**：
+
+```sh
+useradd --system --user-group --no-create-home --home-dir /var/lib/caddy --shell /sbin/nologin caddy
+install -d -o root -g caddy -m 0750 /etc/caddy
+install -d -o caddy -g caddy -m 0700 /var/lib/caddy
+install -o root -g caddy -m 0640 Caddyfile.example /etc/caddy/Caddyfile
+install -o root -g root -m 0644 caddy.service /etc/systemd/system/caddy.service
+```
+
+编辑 `/etc/caddy/Caddyfile` 的域名，并在应用的 `/etc/mugonzei/server.env` 中将 `MUGONZEI_TRUSTED_PROXIES` 改成 `127.0.0.1`，其余配置保留。Caddy 默认忽略客户端伪造的 `X-Forwarded-*`，自行写入真实连接的地址和协议；应用已有 `ForwardLimit=1`，与同机 IPv4 代理的一跳链路相符，不需要手写 `header_up`。当前没有前置 CDN，不要给 Caddy 添加宽泛的 `trusted_proxies`。[转发头说明](https://caddyserver.com/docs/caddyfile/directives/reverse_proxy#defaults)
+
+```sh
+chmod 0600 /etc/mugonzei/server.env
+systemd-analyze verify /etc/systemd/system/caddy.service
+runuser -u caddy -- /opt/mugonzei/caddy/caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile
+systemctl daemon-reload
+systemctl restart mugonzei.service
+systemctl enable --now caddy.service
+```
+
+Caddy 以独立用户运行，只授予绑定低端口所需的 `CAP_NET_BIND_SERVICE`；应用数据库和配置仍归原服务用户/root，不向 caddy 授权。证书、私钥和自动保存配置持久存放在 `/var/lib/caddy`，保留 0700 权限，不加入仓库或发行包。默认管理 API 只监听 loopback 的 2019，保留该设置以支持 reload。若 SELinux 开启，检查二进制和 unit 的标签与审计记录。[官方 systemd/SELinux 说明](https://caddyserver.com/docs/running)
+
+域名配置会自动启用公信证书、续期及 HTTP→HTTPS；不使用 `tls internal` 或 `http://` 站点前缀。默认 HTTP/TLS-ALPN 挑战即可，不需要 DNS 插件。修改配置后先以 caddy 用户重新 validate，再 `systemctl reload caddy.service`。[自动 HTTPS 条件](https://caddyserver.com/docs/automatic-https)
+
+从服务器之外验证，替换下列示例域名，不加 `-k` 跳过证书检查：
+
+```sh
+curl -sS -D - -o /dev/null http://api.example.com/health
+curl -fsS https://api.example.com/health
+curl -fsS https://api.example.com/v1/plans
+curl -sS -o /dev/null -w '%{http_code}\n' https://api.example.com/v1/account
+```
+
+预期依次为 HTTPS 重定向、`{"status":"ok"}`、`[]`、`401`。服务器上检查 `systemctl is-active caddy.service mugonzei.service`、`journalctl -u caddy.service -n 50 --no-pager` 和 `ss -ltnp`，确认没有证书/代理错误且后台仍只监听 `127.0.0.1:5187`。客户端填写 `https://api.example.com` 并重新登录；健康检查成功不表示真实充值或模型已配置。
+
+此模板已在 Alibaba Cloud Linux 3、Caddy 2.11.8 上验证：公信证书签发、HTTP 重定向、外部客户端的证书校验与注册/账号鉴权/退出均通过；测试未启用真实支付或 AI，测试账号已清理。
+
+**回退：** 先停用代理 `systemctl disable --now caddy.service`，恢复应用 `MUGONZEI_TRUSTED_PROXIES=` 并重启 mugonzei，然后用前述 SSH 隧道连接。按原配置恢复 DNS/安全组规则，保留数据库和 `/var/lib/caddy`，不要删除私钥或账户数据。只回退 Caddyfile 时，恢复先前文件、validate 后 reload 即可；配置验证失败不要覆盖仍正常运行的服务。
+
 ## 备份、更新与密钥
 
 数据库只支持一个服务进程。首次安装之外，不要覆盖 `server.env`；编辑后保持 `chmod 600 /etc/mugonzei/server.env`，重启服务才会加载新值。此文件使用 systemd `EnvironmentFile` 语法，不写 `export`；不要将真实密钥提交 Git、放进发行 ZIP、命令参数或终端截图。

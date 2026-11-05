@@ -101,6 +101,7 @@ $required = @(
     'README.md', 'README.ja.md', 'README.en.md', 'docs/images/workspace.png', 'THIRD-PARTY-NOTICES.md',
     'server/README.md', 'server/configuration.example.txt',
     'server/deploy/README.md', 'server/deploy/mugonzei.service', 'server/deploy/server.env.example', 'server/deploy/build-sqlite-linux.py',
+    'server/deploy/Caddyfile.example', 'server/deploy/caddy.service',
     'licenses/DotNetRuntime-LICENSE.txt', 'licenses/DotNetRuntime-THIRD-PARTY-NOTICES.txt',
     'licenses/WindowsDesktopRuntime-LICENSE.txt', 'licenses/DotNetRuntime-manifest.json',
     'assets/actions.json', 'assets/bindings_oculus_touch.json',
