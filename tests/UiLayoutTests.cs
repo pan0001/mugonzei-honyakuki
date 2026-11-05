@@ -91,6 +91,19 @@ public static class UiLayoutTests
                     aiScroll.AutoScrollPosition = Point.Empty;
                     Settle(form);
                     Render(form, output, "settings-api-preview.png");
+                    backend.SelectedIndex = 3;
+                    mode.SelectedIndex = 2;
+                    Settle(form);
+                    var creditAddress = Named<TextBox>(form, "creditServerUrl");
+                    var creditAccount = Named<Button>(form, "creditAccountButton");
+                    Check(creditAddress.Visible && creditAccount.Visible && creditAddress.Width > 250,
+                        "The credit service exposes a readable server address and account action");
+                    Check(!preset.Visible && !codexPath.Visible,
+                        "Credit service settings must not imply that local API credentials pay for server usage");
+                    aiScroll.AutoScrollPosition = Point.Empty;
+                    Render(form, output, "settings-credits-preview.png");
+                    backend.SelectedIndex = 1;
+                    mode.SelectedIndex = 1;
                     aiScroll.AutoScrollPosition = new Point(0, aiScroll.DisplayRectangle.Height);
                     Settle(form);
                     Render(form, output, "settings-bottom-preview.png");

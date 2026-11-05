@@ -1,0 +1,31 @@
+# Environment-variable examples. No production keys or accounts are included.
+# Linux deployments should terminate HTTPS at a trusted reverse proxy. Do not expose SQLite files.
+ASPNETCORE_ENVIRONMENT=Production
+ASPNETCORE_URLS=http://127.0.0.1:5187
+MUGONZEI_TRUSTED_PROXIES=
+MUGONZEI_DATABASE=/var/lib/mugonzei/mugonzei.db
+MUGONZEI_LIVE_PAYMENTS=false
+MUGONZEI_MOCK_PAYMENTS=false
+AFDIAN_USER_ID=
+AFDIAN_TOKEN=
+AFDIAN_PAYMENT_BASE_URL=https://afdian.com/order/create
+MUGONZEI_PLANS_JSON=[{"id":"starter","name":"入门积分包","credits":100,"amountFen":500,"afdianPlanId":"REPLACE_WITH_APPROVED_PLAN_ID"}]
+Translation__BaseUrl=
+Translation__ApiKey=
+Translation__Model=
+Translation__TimeoutSeconds=120
+Translation__Concurrency=2
+Translation__QueueCapacity=16
+Translation__Mock=false
+
+# Local-only development: use Development, explicit mock=true, live=false,
+# and a loopback ASPNETCORE_URLS. GET payment pages never add credits;
+# confirming their form POST uses the same verified-order/ledger transaction.
+# Do not enable mock payments or mock translation on a publicly reachable listener.
+# Translation__BaseUrl accepts HTTPS OpenAI-compatible Chat Completions servers;
+# HTTP is permitted only for loopback local model services. A remote upstream requires ApiKey.
+# Blank BaseUrl/Model keeps official translation unavailable without preventing account/login startup.
+# API timestamps use UTC. Usernames: 3–32 ASCII letters/digits/_/-; password: 10–128 characters.
+# Sessions expire after 14 days; logout revokes the current token.
+# Terminal translation source/result retention: 7 days. Ledger and request hashes remain.
+# Payment refresh scans at most the latest 3 pages. Older missed orders need a provider callback/reconciliation.

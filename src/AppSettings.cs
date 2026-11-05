@@ -8,6 +8,7 @@ namespace SteamVrTranslator;
 public sealed class AppSettings
 {
     public string TranslationBackend { get; set; } = "Codex";
+    public string CreditServerUrl { get; set; } = "http://127.0.0.1:5187";
     public string ProcessingMode { get; set; } = "Ocr";
     public string CodexExecutablePath { get; set; } = "";
     public string CodexModel { get; set; } = "";
@@ -123,7 +124,8 @@ public static class SettingsStore
             && value.Length <= maximum && (allowEmpty || !string.IsNullOrWhiteSpace(value));
         static bool Number(float value, float minimum, float maximum) => float.IsFinite(value)
             && value >= minimum && value <= maximum;
-        if (settings.TranslationBackend is not ("Codex" or "OpenAI" or "GoogleTranslate")
+        if (settings.TranslationBackend is not ("Codex" or "OpenAI" or "GoogleTranslate" or "Credits")
+            || !Text(settings.CreditServerUrl, 2048)
             || settings.ProcessingMode is not ("Ocr" or "Image" or "Handwriting" or "LocalJapanese")
             || settings.ApiImageDetail is not ("Default" or "High" or "Low" or "Auto")
             || !Text(settings.CodexExecutablePath, 4096, true) || !Text(settings.CodexModel, 256, true)

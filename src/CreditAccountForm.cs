@@ -1,0 +1,303 @@
+using System.Diagnostics;
+
+namespace SteamVrTranslator;
+
+/// <summary>All network activity is initiated by a button. Opening or rendering this window is offline.</summary>
+public sealed class CreditAccountForm : Form
+{
+    private readonly Func<string, CreditServiceClient> createClient;
+    private readonly TextBox endpoint = Input("creditAccountServer"), username = Input("creditUsername"), password = Input("creditPassword");
+    private readonly Label status = Note("登录后可查看余额、购买次数包和恢复最近译文。"), balance = Note("尚未刷新账户");
+    private readonly ComboBox plans = new UiComboBox { Name = "creditPlans", DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
+    private readonly ListView ledger = Table("creditLedger", ("时间", 150), ("类型", 110), ("变动", 80), ("余额", 80), ("关联编号", 300));
+    private readonly ListView orders = Table("creditOrders", ("时间", 150), ("状态", 110), ("积分", 80), ("金额", 90), ("订单编号", 280));
+    private readonly TextBox recent = new() { Name = "creditRecentTranslation", Multiline = true, ReadOnly = true, ScrollBars = ScrollBars.Vertical,
+        Dock = DockStyle.Fill, BackColor = UiTheme.Input, ForeColor = UiTheme.Ink, BorderStyle = BorderStyle.None };
+    private readonly List<Button> actionButtons = [];
+    private readonly CancellationTokenSource lifetime = new();
+    private CreditServiceClient? client;
+    private bool working, closing, resourcesDisposed;
+    private Guid? pendingOrderRequest;
+    private string? pendingPlan;
+    public string ServerUrl { get; private set; }
+
+    public CreditAccountForm(string serverUrl) : this(serverUrl, url => new CreditServiceClient(url)) { }
+    internal CreditAccountForm(string serverUrl, Func<string, CreditServiceClient> createClient)
+    {
+        ServerUrl = CreditServiceClient.NormalizeServerUrl(serverUrl);
+        this.createClient = createClient;
+        Text = "无言势翻译器 · 积分账户";
+        AutoScaleMode = AutoScaleMode.Dpi;
+        AutoScaleDimensions = new SizeF(96, 96);
+        Font = new Font("Microsoft YaHei UI", 10);
+        BackColor = UiTheme.Background; ForeColor = UiTheme.Ink;
+        Size = new Size(1020, 820); MinimumSize = new Size(820, 660);
+        StartPosition = FormStartPosition.CenterParent;
+        endpoint.Text = ServerUrl; password.UseSystemPasswordChar = true;
+        username.PlaceholderText = "3–32 位字母、数字、下划线或连字符"; password.PlaceholderText = "10–128 个字符；密码不会保存到本机";
+        BuildUi();
+        FormClosing += (_, _) => { closing = true; lifetime.Cancel(); };
+    }
+
+    private void BuildUi()
+    {
+        var shell = new TableLayoutPanel { Dock = DockStyle.Fill, Padding = new Padding(24), ColumnCount = 1, RowCount = 4 };
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        shell.RowStyles.Add(new RowStyle(SizeType.AutoSize)); shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        Controls.Add(shell);
+        var heading = Note("积分账户"); heading.Font = new Font(Font.FontFamily, 23, FontStyle.Bold); heading.ForeColor = UiTheme.Ink;
+        shell.Controls.Add(heading, 0, 0);
+        var address = new TableLayoutPanel { AutoSize = true, Dock = DockStyle.Fill, ColumnCount = 2, Margin = new Padding(0, 10, 0, 18) };
+        address.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); address.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        address.Controls.Add(Frame(endpoint), 0, 0);
+        address.Controls.Add(ActionButton("使用此服务地址", () => { ApplyEndpoint(); return Task.CompletedTask; }), 1, 0);
+        shell.Controls.Add(address, 0, 1);
+        var section = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty };
+        section.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        section.RowStyles.Add(new RowStyle(SizeType.AutoSize)); section.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        var navigation = Flow(); navigation.Margin = new Padding(0, 0, 0, 10);
+        var tabs = new UiPages { Name = "creditAccountTabs", Dock = DockStyle.Fill };
+        section.Controls.Add(navigation, 0, 0); section.Controls.Add(tabs, 0, 1);
+        shell.Controls.Add(section, 0, 2);
+        BuildAccountTab(tabs); BuildPurchaseTab(tabs); BuildLedgerTab(tabs); BuildRecoveryTab(tabs);
+        for (int index = 0; index < tabs.TabPages.Count; index++)
+        {
+            int selectedIndex = index;
+            var button = new UiButton { Text = tabs.TabPages[index].Text, AutoSize = true,
+                Name = "creditNavigation" + index, Selected = index == 0, Margin = new Padding(0, 0, 8, 0) };
+            button.Click += (_, _) => tabs.SelectedIndex = selectedIndex;
+            tabs.SelectedIndexChanged += (_, _) => button.Selected = tabs.SelectedIndex == selectedIndex;
+            navigation.Controls.Add(button);
+        }
+        status.Dock = DockStyle.Fill; status.Padding = new Padding(0, 14, 0, 0); status.ForeColor = UiTheme.Accent;
+        status.MaximumSize = new Size(900, 0); shell.Controls.Add(status, 0, 3);
+        shell.SizeChanged += (_, _) => status.MaximumSize = new Size(Math.Max(200, shell.ClientSize.Width - shell.Padding.Horizontal), 0);
+    }
+
+    private void BuildAccountTab(TabControl tabs)
+    {
+        var page = Page(tabs, "登录与余额"); var stack = Stack(); page.Controls.Add(stack);
+        Add(stack, Note("仅向上方服务发送用户名和密码。登录令牌按服务地址分别加密保存；更换地址不会转发原令牌。"));
+        Add(stack, Note("用户名 · 3–32 位英文字母、数字、下划线或短横线")); Add(stack, Frame(username));
+        Add(stack, Note("密码 · 10–128 个字符，不保存到本机")); Add(stack, Frame(password));
+        var actions = Flow();
+        actions.Controls.Add(ActionButton("登录", () => Authenticate(false), primary: true));
+        actions.Controls.Add(ActionButton("注册", () => Authenticate(true)));
+        actions.Controls.Add(ActionButton("退出登录", Logout));
+        actions.Controls.Add(ActionButton("清除本地登录", () => { EnsureClient().ClearLocalSession(); ClearDisplays(); status.Text = "本地登录已清除。服务器上的会话将按其有效期失效。"; return Task.CompletedTask; }));
+        Add(stack, actions); Add(stack, balance);
+        Add(stack, ActionButton("刷新余额、流水与订单", RefreshAll));
+        Add(stack, Note("只有完整翻译成功才扣费；任务运行时可能预留积分。取消和断线后的最终结果以服务端记录为准。\n账户窗口中修改的服务地址会带回主界面，请在主界面保存设置后用于翻译。"));
+    }
+
+    private void BuildPurchaseTab(TabControl tabs)
+    {
+        var page = Page(tabs, "次数包与订单");
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5 };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        for (int i = 0; i < 4; i++) layout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); page.Controls.Add(layout);
+        layout.Controls.Add(Note("先登录并刷新账户，再选择次数包。付款会在外部浏览器完成；请勿重复支付同一订单。"), 0, 0);
+        plans.Margin = new Padding(0, 10, 0, 12); layout.Controls.Add(plans, 0, 1);
+        var actions = Flow();
+        actions.Controls.Add(ActionButton("购买所选次数包", Purchase, primary: true));
+        actions.Controls.Add(ActionButton("打开所选订单支付页", OpenSelectedPayment));
+        actions.Controls.Add(ActionButton("刷新所选订单", RefreshSelectedOrder));
+        actions.Controls.Add(ActionButton("刷新订单列表", RefreshAll));
+        layout.Controls.Add(actions, 0, 2);
+        layout.Controls.Add(Note("支付页打开或返回客户端不表示到账。请刷新订单，到账以服务端确认后的积分余额为准。"), 0, 3);
+        layout.Controls.Add(orders, 0, 4);
+    }
+
+    private void BuildLedgerTab(TabControl tabs)
+    {
+        var page = Page(tabs, "积分流水"); page.Controls.Add(ledger);
+    }
+
+    private void BuildRecoveryTab(TabControl tabs)
+    {
+        var page = Page(tabs, "恢复最近译文");
+        var layout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3 };
+        layout.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        layout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); layout.RowStyles.Add(new RowStyle(SizeType.AutoSize)); layout.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        page.Controls.Add(layout);
+        layout.Controls.Add(Note("查询同一服务、同一账户保存的最近任务编号，不创建新任务，也不会再次扣费。\n恢复的原文和译文仅显示在这里，不会自动发送到 VR 字幕。"), 0, 0);
+        var actions = Flow();
+        actions.Controls.Add(ActionButton("查询 / 恢复最近任务", Recover));
+        actions.Controls.Add(ActionButton("取消最近任务", CancelRecent));
+        layout.Controls.Add(actions, 0, 1); recent.Margin = new Padding(0, 12, 0, 0); layout.Controls.Add(recent, 0, 2);
+    }
+
+    private CreditServiceClient EnsureClient()
+    {
+        if (CreditServiceClient.NormalizeServerUrl(endpoint.Text) != ServerUrl)
+            throw new InvalidOperationException("服务地址尚未应用，请先点击“使用此服务地址”。");
+        return client ??= createClient(ServerUrl);
+    }
+
+    private void ApplyEndpoint()
+    {
+        string changed = CreditServiceClient.NormalizeServerUrl(endpoint.Text);
+        if (changed != ServerUrl)
+        {
+            client?.Dispose(); client = null; ServerUrl = changed; password.Clear(); ClearDisplays();
+            pendingOrderRequest = null; pendingPlan = null;
+        }
+        endpoint.Text = ServerUrl;
+        status.Text = "服务地址已应用。请登录或刷新已有登录；此操作没有连接服务。";
+    }
+
+    private async Task Authenticate(bool register)
+    {
+        var service = EnsureClient();
+        CreditSession session;
+        try { session = register ? await service.RegisterAsync(username.Text, password.Text, lifetime.Token) : await service.LoginAsync(username.Text, password.Text, lifetime.Token); }
+        finally { password.Clear(); }
+        if (closing) return;
+        ClearDisplays(); username.Text = session.Username; pendingOrderRequest = null; pendingPlan = null;
+        status.Text = "登录成功，正在读取账户…";
+        await RefreshAll();
+    }
+
+    private async Task Logout()
+    {
+        try { await EnsureClient().LogoutAsync(lifetime.Token); }
+        finally { if (!closing) { password.Clear(); ClearDisplays(); pendingOrderRequest = null; pendingPlan = null; } }
+        if (!closing) status.Text = "已退出当前积分账户。";
+    }
+
+    private async Task RefreshAll()
+    {
+        var service = EnsureClient();
+        var accountTask = service.GetAccountAsync(lifetime.Token);
+        var ledgerTask = service.GetLedgerAsync(lifetime.Token);
+        var plansTask = service.GetPlansAsync(lifetime.Token);
+        var ordersTask = service.GetOrdersAsync(lifetime.Token);
+        await Task.WhenAll(accountTask, ledgerTask, plansTask, ordersTask);
+        if (closing) return;
+        var account = await accountTask;
+        balance.Text = $"账户：{account.Username}    总余额：{account.Balance}    预留：{account.Reserved}    可用：{Math.Max(0, account.Balance - account.Reserved)} 积分";
+        ledger.BeginUpdate(); ledger.Items.Clear();
+        foreach (var row in (await ledgerTask).Take(1000)) ledger.Items.Add(new ListViewItem([
+            row.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss"), row.Kind, row.Amount.ToString("+0;-0;0"), row.Balance.ToString(), row.Reference]));
+        ledger.EndUpdate();
+        string? selected = (plans.SelectedItem as CreditPlan)?.Id;
+        plans.Items.Clear();
+        foreach (var plan in (await plansTask).Take(100)) plans.Items.Add(plan);
+        plans.SelectedIndex = plans.Items.Cast<CreditPlan>().Select((p, index) => (p, index)).FirstOrDefault(x => x.p.Id == selected, (null!, -1)).index;
+        if (plans.SelectedIndex < 0 && plans.Items.Count > 0) plans.SelectedIndex = 0;
+        PopulateOrders(await ordersTask);
+        status.Text = "账户已刷新。";
+    }
+
+    private async Task Purchase()
+    {
+        if (plans.SelectedItem is not CreditPlan plan) throw new InvalidOperationException("请先登录并刷新次数包列表。");
+        if (pendingOrderRequest is null || pendingPlan != plan.Id) { pendingOrderRequest = Guid.NewGuid(); pendingPlan = plan.Id; }
+        var order = await EnsureClient().CreateOrderAsync(plan.Id, pendingOrderRequest.Value, lifetime.Token);
+        if (closing) return;
+        // Keep this request ID until a confirmed response, so retrying a disconnected create cannot duplicate an order.
+        pendingOrderRequest = null; pendingPlan = null;
+        UpsertOrder(order);
+        if (order.Status is "paid" or "completed") { status.Text = "订单已支付，请刷新余额。"; return; }
+        OpenPayment(order);
+        status.Text = "已打开订单支付页。付款后请刷新所选订单。";
+    }
+
+    private Task OpenSelectedPayment() { OpenPayment(SelectedOrder()); return Task.CompletedTask; }
+    private void OpenPayment(CreditOrder order)
+    {
+        if (string.IsNullOrWhiteSpace(order.PayUrl)) throw new InvalidOperationException("此订单没有可打开的支付地址，请刷新订单。");
+        var uri = CreditServiceClient.ValidatePaymentUrl(order.PayUrl, ServerUrl);
+        Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true });
+    }
+
+    private async Task RefreshSelectedOrder()
+    {
+        var selected = SelectedOrder();
+        var updated = await EnsureClient().GetOrderAsync(selected.Id, refresh: true, lifetime.Token);
+        if (closing) return;
+        UpsertOrder(updated); await RefreshAll();
+        if (!closing) status.Text = "订单状态：" + updated.Status + "。余额已刷新。";
+    }
+
+    private CreditOrder SelectedOrder() => orders.SelectedItems.Count > 0 && orders.SelectedItems[0].Tag is CreditOrder order
+        ? order : throw new InvalidOperationException("请先选择一个订单。");
+    private void PopulateOrders(IEnumerable<CreditOrder> rows)
+    {
+        string? selected = orders.SelectedItems.Count > 0 ? (orders.SelectedItems[0].Tag as CreditOrder)?.Id : null;
+        orders.BeginUpdate(); orders.Items.Clear();
+        foreach (var order in rows.Take(1000)) { var item = OrderItem(order); item.Selected = order.Id == selected; orders.Items.Add(item); }
+        orders.EndUpdate();
+    }
+    private void UpsertOrder(CreditOrder order)
+    {
+        var existing = orders.Items.Cast<ListViewItem>().FirstOrDefault(i => (i.Tag as CreditOrder)?.Id == order.Id);
+        if (existing is not null) orders.Items.Remove(existing);
+        var item = OrderItem(order); orders.Items.Insert(0, item); item.Selected = true; item.EnsureVisible();
+    }
+    private static ListViewItem OrderItem(CreditOrder order) => new([
+        order.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss"), order.Status, order.Credits.ToString(),
+        "¥" + (order.AmountFen / 100m).ToString("0.00"), order.Id]) { Tag = order };
+
+    private async Task Recover()
+    {
+        var result = await EnsureClient().ResumeLatestAsync(lifetime.Token);
+        if (!closing) ShowRecent(result);
+    }
+    private async Task CancelRecent()
+    {
+        var service = EnsureClient();
+        if (service.Session?.RecentTaskId is not Guid id) throw new InvalidOperationException("没有可取消的最近任务。");
+        var result = await service.CancelAsync(id, lifetime.Token);
+        if (!closing) { ShowRecent(result); status.Text = "已查询取消结果。已完成任务的费用不会回滚。"; }
+    }
+    private void ShowRecent(CreditTranslationResult result)
+    {
+        recent.Text = $"任务：{result.Id}\r\n状态：{(result.IsExpired ? "译文已过期" : result.Status)}    总余额：{result.Balance}\r\n\r\n原文\r\n{result.SourceText}\r\n\r\n译文\r\n{result.Translation}\r\n{result.Error}";
+        status.Text = result.IsExpired ? result.Error : result.IsTerminal ? "最近任务已恢复，仅显示在本窗口。" : "任务仍在处理中，可稍后再次查询。";
+    }
+    private void ClearDisplays() { balance.Text = "尚未刷新账户"; plans.Items.Clear(); orders.Items.Clear(); ledger.Items.Clear(); recent.Clear(); }
+
+    private Button ActionButton(string label, Func<Task> action, bool primary = false)
+    {
+        var button = new UiButton { Text = label, AutoSize = true, Primary = primary, MinimumSize = new Size(100, 38), Margin = new Padding(0, 4, 10, 4) };
+        actionButtons.Add(button);
+        button.Click += async (_, _) =>
+        {
+            if (working || closing) return;
+            working = true; SetBusy(true); status.Text = "正在处理…";
+            try { await action(); }
+            catch (OperationCanceledException) { if (!closing) status.Text = "操作已取消。"; }
+            catch (Exception error) { if (!closing) status.Text = error is InvalidOperationException ? error.Message : "操作未完成，请稍后重试。"; }
+            finally { working = false; if (!closing) SetBusy(false); }
+        };
+        return button;
+    }
+    private void SetBusy(bool value)
+    {
+        foreach (var button in actionButtons) button.Enabled = !value;
+        endpoint.Enabled = username.Enabled = password.Enabled = plans.Enabled = !value;
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing && !resourcesDisposed) { resourcesDisposed = true; closing = true; lifetime.Cancel(); client?.Dispose(); lifetime.Dispose(); }
+        base.Dispose(disposing);
+    }
+    private static TextBox Input(string name) => new() { Name = name, Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = UiTheme.Input, ForeColor = UiTheme.Ink };
+    private static Label Note(string text) => new() { Text = text, AutoSize = true, ForeColor = UiTheme.Muted, UseMnemonic = false, MaximumSize = new Size(860, 0), Margin = new Padding(0, 6, 0, 10) };
+    private static Panel Frame(TextBox field) { var panel = new Panel { Height = 42, Dock = DockStyle.Top, BackColor = UiTheme.Input, Padding = new Padding(12, 10, 12, 8), Margin = new Padding(0, 0, 0, 10) }; panel.Controls.Add(field); return panel; }
+    private static FlowLayoutPanel Flow() => new() { AutoSize = true, Dock = DockStyle.Top, WrapContents = true, Margin = Padding.Empty };
+    private static TableLayoutPanel Stack() { var panel = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 1 }; panel.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); return panel; }
+    private static void Add(TableLayoutPanel stack, Control value) { int row = stack.RowCount++; stack.RowStyles.Add(new RowStyle(SizeType.AutoSize)); value.Dock = DockStyle.Top; stack.Controls.Add(value, 0, row); }
+    private static TabPage Page(TabControl tabs, string title) { var page = new TabPage(title) { BackColor = UiTheme.Card, ForeColor = UiTheme.Ink, Padding = new Padding(18), AutoScroll = true }; tabs.TabPages.Add(page); return page; }
+    private static ListView Table(string name, params (string Title, int Width)[] columns)
+    {
+        var table = new ListView { Name = name, Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, MultiSelect = false,
+            HideSelection = false, BackColor = UiTheme.Input, ForeColor = UiTheme.Ink, BorderStyle = BorderStyle.None };
+        foreach (var column in columns) table.Columns.Add(column.Title, column.Width);
+        return table;
+    }
+}

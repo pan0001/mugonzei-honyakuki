@@ -13,6 +13,17 @@ if (args.Length == 2 && args[0] == "--fake-local-ocr")
 
 try
 {
+    if (args.Length == 3 && args[0] == "--credits-e2e")
+    {
+        await CreditIntegrationTests.RunEndToEndAsync(args[1], args[2]);
+        return;
+    }
+    if (args.Contains("--credits-regression"))
+    {
+        await CreditServiceTests.RunAsync();
+        CreditIntegrationTests.Run();
+        return;
+    }
     if (args.Contains("--setup-regression"))
     {
         SetupWizardTests.Run();
@@ -40,6 +51,8 @@ try
         return;
     }
     SetupWizardTests.Run();
+    await CreditServiceTests.RunAsync();
+    CreditIntegrationTests.Run();
     LongPressTests.Run();
     CaptureRequestTests.Run();
     GestureCancelTests.Run();

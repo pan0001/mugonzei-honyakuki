@@ -21,3 +21,14 @@ tools/package-ring-fix.ps1
 *.vrmanifest
 Thumbs.db
 .DS_Store
+server/data/
+**/*.db
+**/*.db-shm
+**/*.db-wal
+**/*.sqlite
+**/*.sqlite-shm
+**/*.sqlite-wal
+**/credit-session*
+**/credit-tasks*
+**/CreditSessions/
+/data/

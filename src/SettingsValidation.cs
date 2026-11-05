@@ -12,6 +12,8 @@ internal static class SettingsValidation
             GoogleTranslateClient.NormalizeTargetLanguage(settings.TargetLanguage);
         if (requireServiceConfiguration && settings.TranslationBackend == "OpenAI")
             TranslationClient.ValidateSettings(settings);
+        if (settings.TranslationBackend == "Credits")
+            _ = CreditServiceClient.NormalizeServerUrl(settings.CreditServerUrl);
 
         var desired = Hotkeys.Parse(settings.Hotkey);
         if (new[] { "Ctrl+Alt+Right", "Ctrl+Alt+Left", "Ctrl+Alt+H" }.Any(h => Hotkeys.Parse(h) == desired))

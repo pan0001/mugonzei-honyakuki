@@ -60,7 +60,8 @@ function Test-ExcludedPath([string]$RelativePath) {
     # Generated caches and the machine-specific SteamVR registration are never shipped.
     if ($name -match '(^|/)__pycache__(/|$)' -or $name -match '\.(pyc|pyo|pdb|vrmanifest)$') { return $true }
     # Do not traverse or read accidental local user artifacts in a reused publish directory.
-    if ($name -match '(^|/)(artifacts|screenshots|captures|GoogleWebView2|[^/]+\.WebView2|\.git|\.codex)(/|$)') { return $true }
+    if ($name -match '(^|/)(artifacts|screenshots|captures|CreditSessions|data|GoogleWebView2|[^/]+\.WebView2|\.git|\.codex)(/|$)') { return $true }
+    if ($name -match '\.(db|db-shm|db-wal|sqlite|sqlite-shm|sqlite-wal)$') { return $true }
     if ($name -match '(^|/)(settings\.json|auth\.json|credentials\.json|\.env(?:\..*)?|runtime-faults\.jsonl(?:\.previous)?|[^/]*-diagnostics\.json|baseline-[^/]*\.json)$') { return $true }
     return $false
 }
@@ -98,6 +99,7 @@ foreach ($output in @($archivePath, $reportPath, $temporaryArchive, $temporaryRe
 $required = @(
     'SteamVrTranslator.exe', 'SteamVrTranslator.dll', 'SteamVrTranslator.deps.json',
     'README.md', 'README.ja.md', 'README.en.md', 'docs/images/workspace.png', 'THIRD-PARTY-NOTICES.md',
+    'server/README.md', 'server/configuration.example.txt',
     'licenses/DotNetRuntime-LICENSE.txt', 'licenses/DotNetRuntime-THIRD-PARTY-NOTICES.txt',
     'licenses/WindowsDesktopRuntime-LICENSE.txt', 'licenses/DotNetRuntime-manifest.json',
     'assets/actions.json', 'assets/bindings_oculus_touch.json',

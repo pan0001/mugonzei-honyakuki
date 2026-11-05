@@ -30,12 +30,13 @@ internal sealed class SetupWizardForm : Form
     private readonly TextBox apiEndpoint = Input("wizardApiEndpoint");
     private readonly TextBox apiModel = Input("wizardApiModel");
     private readonly TextBox apiKey = Input("wizardApiKey");
+    private readonly TextBox creditServer = Input("wizardCreditServerUrl");
     private readonly ComboBox apiImageDetail = Combo("wizardApiImageDetail");
     private readonly CheckBox apiStream = Check("使用流式接口（部分模型需要）", "wizardApiStream");
     private readonly ComboBox captureMode = Combo("wizardCaptureMode");
     private readonly TextBox hotkey = Input("wizardHotkey");
     private readonly CheckBox controller = Check("启用 VR 手柄按键", "wizardControllerEnabled");
-    private UiCard codexCard = null!, apiCard = null!, googleCard = null!;
+    private UiCard codexCard = null!, apiCard = null!, googleCard = null!, creditCard = null!;
     private string credentialAddress = "";
     private bool loading = true, finishing;
 
@@ -105,6 +106,7 @@ internal sealed class SetupWizardForm : Form
         draft.TranslationBackend = SelectedBackend;
         draft.ProcessingMode = SelectedMode;
         draft.TargetLanguage = targetLanguage.Text.Trim();
+        if (SelectedBackend == "Credits") draft.CreditServerUrl = creditServer.Text.Trim();
         // An abandoned, hidden provider draft must neither block completion nor
         // replace that provider's previously saved credentials.
         if (SelectedBackend == "Codex")
@@ -198,7 +200,7 @@ internal sealed class SetupWizardForm : Form
         ClearError();
     }
 
-    private string SelectedBackend => backend.SelectedIndex switch { 1 => "OpenAI", 2 => "GoogleTranslate", _ => "Codex" };
+    private string SelectedBackend => backend.SelectedIndex switch { 1 => "OpenAI", 2 => "GoogleTranslate", 3 => "Credits", _ => "Codex" };
     private string SelectedMode => processingMode.SelectedIndex switch { 1 => "Image", 2 => "Handwriting", 3 => "LocalJapanese", _ => "Ocr" };
 
     private void ValidateChoice()
@@ -211,6 +213,11 @@ internal sealed class SetupWizardForm : Form
 
     private void ValidateService()
     {
+        if (SelectedBackend == "Credits")
+        {
+            _ = CreditServiceClient.NormalizeServerUrl(creditServer.Text.Trim());
+            return;
+        }
         if (SelectedBackend == "Codex")
         {
             if (codexModel.Text.Trim().Length > 256 || codexModel.Text.Any(char.IsControl))
@@ -230,7 +237,7 @@ internal sealed class SetupWizardForm : Form
 
     private void InitializeChoices()
     {
-        backend.Items.AddRange(["本机 Codex", "其他 AI API（云端 / 本机）", "Google Translate（后台网页）"]);
+        backend.Items.AddRange(["本机 Codex", "其他 AI API（云端 / 本机）", "Google Translate（后台网页）", "积分服务（爱发电）"]);
         processingMode.Items.AddRange(["本地OCR（不推荐）", "直接发送截图给模型", "手写体 OCR（AI）→ 翻译", "本地日语手写 OCR → 翻译"]);
         codexReasoning.Items.AddRange(["自动（按阶段）", "low", "medium", "high"]);
         apiPreset.Items.AddRange(ApiProviderPresets.All.Select(preset => (object)preset.Name).ToArray());
@@ -242,13 +249,15 @@ internal sealed class SetupWizardForm : Form
         apiModel.PlaceholderText = "填写所选服务实际支持的模型名称";
         apiKey.PlaceholderText = "本机服务未启用鉴权时可留空";
         apiKey.UseSystemPasswordChar = true;
+        creditServer.PlaceholderText = "填写运营者提供的服务端地址";
         targetLanguage.PlaceholderText = "例如：简体中文 / 日本語 / English";
         hotkey.PlaceholderText = "例如 Ctrl+Alt+T";
     }
 
     private void LoadInitialValues()
     {
-        backend.SelectedIndex = initial.TranslationBackend switch { "OpenAI" => 1, "GoogleTranslate" => 2, _ => 0 };
+        backend.SelectedIndex = initial.TranslationBackend switch { "OpenAI" => 1, "GoogleTranslate" => 2, "Credits" => 3, _ => 0 };
+        creditServer.Text = initial.CreditServerUrl;
         processingMode.SelectedIndex = initial.ProcessingMode switch { "Image" => 1, "Handwriting" => 2, "LocalJapanese" => 3, _ => 0 };
         targetLanguage.Text = initial.TargetLanguage;
         codexPath.Text = initial.CodexExecutablePath;
@@ -359,6 +368,9 @@ internal sealed class SetupWizardForm : Form
 
         googleCard = Card(page, "Google Translate 后台网页", "适合先在本机识别，再翻译原文");
         Row(googleCard, "", Note("无需 API 密钥。程序在独立 WebView2 网页中输入识别文字、读取译文，不抢占桌面鼠标。\n图片留在本机，只有识别原文发送给 Google Translate。\n需要网络和 WebView2 Runtime；网页验证、限流或页面变化可能使翻译暂时不可用。\n此服务不识别图片，请使用本地 OCR 或本地日语手写 OCR。"), true);
+        creditCard = Card(page, "积分服务", "完整翻译成功扣 1 积分，爱发电购买次数包");
+        Row(creditCard, "服务地址", creditServer);
+        Row(creditCard, "", Note("填写运营者提供的 HTTPS 地址。本机地址 http://127.0.0.1:5187 用于开发测试。\n保存后到「AI 服务 → 账号与积分」注册、登录和购买次数包。\n本步骤只保存服务地址，不会创建账号、付款或发送截图。"), true);
         return page;
     }
 
@@ -385,6 +397,7 @@ internal sealed class SetupWizardForm : Form
         codexCard.Visible = SelectedBackend == "Codex";
         apiCard.Visible = SelectedBackend == "OpenAI";
         googleCard.Visible = SelectedBackend == "GoogleTranslate";
+        creditCard.Visible = SelectedBackend == "Credits";
         bool incompatible = SelectedBackend == "GoogleTranslate" && SelectedMode is "Image" or "Handwriting";
         modeNote.ForeColor = incompatible ? Color.FromArgb(255, 174, 161) : UiTheme.Muted;
         modeNote.Text = incompatible
@@ -396,6 +409,9 @@ internal sealed class SetupWizardForm : Form
                 "LocalJapanese" => "本地日语 OCR：使用 NDLOCR-Lite 在电脑上识别日文。复杂手写仍可能误读，请核对原文。",
                 _ => "本地 OCR：使用 Tesseract 识别印刷文字，再发送原文翻译。潦草手写建议尝试 AI 手写识别。"
             };
+        if (SelectedBackend == "Credits") modeNote.Text = SelectedMode is "Image" or "Handwriting"
+            ? "积分服务在服务器识别原文，再翻译。整张图成功扣 1 分；无字、失败或完成前取消不扣。"
+            : "先在本机识别，再把原文发给积分服务。成功翻译扣 1 分；仅本地识别不扣。";
         ClearError();
         RefreshSummary();
     }
@@ -404,23 +420,27 @@ internal sealed class SetupWizardForm : Form
     {
         if (loading) return;
         var draft = ReadSettingsDraft();
-        string service = SelectedBackend switch { "OpenAI" => "其他 AI API", "GoogleTranslate" => "Google Translate 后台网页", _ => "本机 Codex" };
+        string service = SelectedBackend switch { "OpenAI" => "其他 AI API", "GoogleTranslate" => "Google Translate 后台网页", "Credits" => "积分服务（爱发电）", _ => "本机 Codex" };
         string mode = processingMode.SelectedItem?.ToString() ?? "本地OCR（不推荐）";
         string reasoning = draft.CodexReasoningEffort.Length == 0 ? "自动（按阶段）" : draft.CodexReasoningEffort;
         string model = SelectedBackend == "Codex" ? (draft.CodexModel.Length == 0 ? "CLI 默认模型" : draft.CodexModel) : draft.ApiModel;
         summary.Text = $"翻译服务  ·  {service}\n识图方式  ·  {mode}\n目标语言  ·  {draft.TargetLanguage}\n画面来源  ·  {draft.CaptureMode}\n键盘快捷键  ·  {draft.Hotkey}";
         if (SelectedBackend == "Codex") summary.Text += $"\n模型  ·  {model}　/　思考程度 {reasoning}";
         if (SelectedBackend == "OpenAI") summary.Text += $"\n模型  ·  {model}\nAPI 地址  ·  {draft.ApiBaseUrl}";
+        if (SelectedBackend == "Credits") summary.Text += $"\n服务地址  ·  {draft.CreditServerUrl}\n计费  ·  完整翻译成功扣 1 积分";
         string destination = SelectedBackend switch
         {
             "Codex" => "已登录的 Codex 在线服务",
             "GoogleTranslate" => "Google Translate 后台网页",
+            "Credits" => "上方配置的积分服务器及其 AI 服务",
             _ => "上方配置的 API 地址"
         };
         disclosure.Text = draft.ProcessingMode is "Image" or "Handwriting"
             ? $"数据去向：截图{(draft.ProcessingMode == "Handwriting" ? "及局部细节图" : "")}会发送给{destination}。"
             : $"数据去向：图片在本机识别，只有识别原文发送给{destination}。";
-        disclosure.Text += "\n日常使用不自动建立截图或翻译历史；当前截图可在工作台手动保存。";
+        disclosure.Text += SelectedBackend == "Credits"
+            ? "\n积分服务器保存订单、消费流水及近期原文/译文，便于断线后恢复。图片仅用于本次任务。\n任务完成后隐藏字幕不会退款；仅 AI 识别请使用自备服务或本地 OCR。"
+            : "\n日常使用不自动建立截图或翻译历史；当前截图可在工作台手动保存。";
         triggerNote.Text = !draft.ControllerEnabled
             ? "手柄触发已关闭。可使用上方键盘快捷键或工作台按钮截图。"
             : draft.SpatialSelectionEnabled
@@ -458,7 +478,7 @@ internal sealed class SetupWizardForm : Form
         Control focus = CurrentStep switch
         {
             0 => backend,
-            1 => SelectedBackend switch { "OpenAI" => apiEndpoint, "Codex" => codexModel, _ => nextButton },
+            1 => SelectedBackend switch { "OpenAI" => apiEndpoint, "Codex" => codexModel, "Credits" => creditServer, _ => nextButton },
             _ => hotkey
         };
         if (Visible) focus.Focus();

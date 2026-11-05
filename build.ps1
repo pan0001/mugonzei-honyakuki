@@ -83,8 +83,13 @@ if (-not (Test-Path -LiteralPath 'tools\local-ocr-runtime\runtime-manifest.json'
     if (-not (Test-Path -LiteralPath 'tools\local-ocr-runtime\runtime-manifest.json')) { throw 'Local OCR runtime setup did not complete.' }
 }
 if (-not $SkipTests) {
+    & $DotnetPath run --project server.tests\Mugonzei.Server.Tests.csproj -c Release
+    if ($LASTEXITCODE -ne 0) { throw 'Server payment/credit tests failed.' }
     & $DotnetPath run --project tests\SteamVrTranslator.Tests.csproj -c Release
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
+    & $DotnetPath run --project tests\SteamVrTranslator.Tests.csproj -c Release --no-build -- --credits-e2e `
+        (Join-Path $PSScriptRoot 'server/bin/Release/net10.0/Mugonzei.Server.dll') (Get-Command $DotnetPath).Source
+    if ($LASTEXITCODE -ne 0) { throw 'Desktop/server credit integration failed.' }
 }
 # Pass the whole MSBuild property as one argument, including spaces/Unicode in the root.
 # This affects only this publish invocation and keeps local source paths out of debug metadata.
@@ -95,6 +100,11 @@ Copy-PublishedRuntimeLicenses $publishRoot (Join-Path $PSScriptRoot 'obj/project
 foreach ($document in @('README.md', 'README.ja.md', 'README.en.md', 'LICENSE')) {
     $source = Join-Path $PSScriptRoot $document
     if (Test-Path -LiteralPath $source -PathType Leaf) { Copy-Item -LiteralPath $source -Destination (Join-Path $publishRoot $document) -Force }
+}
+$serverDocs = Join-Path $publishRoot 'server'
+New-Item -ItemType Directory -Path $serverDocs -Force | Out-Null
+foreach ($document in @('README.md', 'configuration.example.txt')) {
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('server/' + $document)) -Destination (Join-Path $serverDocs $document) -Force
 }
 $workspaceImage = Join-Path $PSScriptRoot 'docs/images/workspace.png'
 if (-not (Test-Path -LiteralPath $workspaceImage -PathType Leaf)) { throw 'README workspace image is missing: docs/images/workspace.png' }

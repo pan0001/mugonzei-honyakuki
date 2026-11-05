@@ -27,7 +27,7 @@ public static class GoogleTranslateUiTests
                     var mode = Field<ComboBox>(form, "processingMode");
                     var showSource = Field<CheckBox>(form, "showSource");
                     var recognize = Field<Button>(form, "recognizeButton");
-                    Check(backend.Items.Count == 3 && backend.GetItemText(backend.Items[2]) == "Google Translate（后台网页）",
+                    Check(backend.Items.Count == 4 && backend.GetItemText(backend.Items[2]) == "Google Translate（后台网页）",
                         "Google Translate is a separate third backend, not the Gemini API preset");
                     Check(!form.HasPendingAiSettings, "Demo defaults begin without unsaved AI changes");
 

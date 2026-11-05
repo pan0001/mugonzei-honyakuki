@@ -1,0 +1,11 @@
+bin/
+obj/
+data/
+tests/
+.env
+.env.*
+appsettings.Production.json
+*.db
+*.db-*
+*.lock
+*.log

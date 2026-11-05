@@ -161,6 +161,7 @@ internal sealed partial class MainForm
         SettingRow(general, "翻译服务", backend);
         SettingRow(general, "识图方式", processingMode);
         SettingRow(general, "目标语言", target);
+        BuildCreditSettings(stack);
         localOcrSettingsCard = SettingsCard(stack, "本地日语手写", "NDLOCR-Lite · CPU 识别 · 图片留在本机");
         SettingRow(localOcrSettingsCard, "引擎状态", localOcrStatus);
         SettingRow(localOcrSettingsCard, "适用内容", Note("日语手写、横排与竖排。首次识别会加载模型，之后重复使用。\n潦草、模糊或过小的文字仍可能误认；中、日、英混合内容可选择 AI 手写模式。"));
@@ -294,7 +295,7 @@ internal sealed partial class MainForm
         endpoint.PlaceholderText = "https://你的服务/v1 或 http://localhost:11434/v1";
         model.PlaceholderText = "填写服务商支持的视觉模型名称";
         apiKey.PlaceholderText = "本机 Ollama 可留空；保存时使用 Windows 加密";
-        backend.Items.AddRange(["本机 Codex", "其他 AI API", "Google Translate（后台网页）"]);
+        backend.Items.AddRange(["本机 Codex", "其他 AI API", "Google Translate（后台网页）", "积分服务（爱发电）"]);
         backend.SelectedIndexChanged += (_, _) => UpdateBackendControls();
         processingMode.Items.AddRange(["本地OCR（不推荐）", "直接发送截图给模型", "手写体 OCR（AI）→ 翻译", "本地日语手写 OCR → 翻译"]);
         processingMode.SelectedIndexChanged += (_, _) => UpdateBackendControls();

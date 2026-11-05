@@ -12,6 +12,12 @@ The WebView2 SDK package's additional third-party notices are retained unchanged
 
 Google Translate is accessed as an external website in the embedded WebView2 browser. It is not a bundled translation model, the Gemini API, or the Google Cloud Translation API. This integration does not grant rights to Google's website or change its terms. WebView2 browser data for this application uses a separate user data directory and does not reuse the user's personal browser profile. [Microsoft user data folder documentation](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/user-data-folder).
 
+## Optional credit server
+
+The separately built `server/` uses ASP.NET Core / .NET 10 and `Microsoft.Data.Sqlite` / `Microsoft.Data.Sqlite.Core` 10.0.0 (MIT). It also uses SQLitePCLRaw managed components 2.1.11 (Apache-2.0), with the native SQLite package explicitly pinned to `SQLitePCLRaw.lib.e_sqlite3` 3.53.3 (SQLite public domain). Restored dependency versions are recorded in the server's NuGet assets and published `.deps.json`. These components are not added to the desktop application.
+
+The server retains and publishes license texts under `server/licenses/`: [Microsoft.Data.Sqlite upstream v10.0.0 license](https://github.com/dotnet/efcore/blob/v10.0.0/LICENSE.txt), [SQLitePCLRaw upstream v2.1.11 license](https://github.com/ericsink/SQLitePCL.raw/blob/v2.1.11/LICENSE.TXT), and the native 3.53.3 package's `LICENSE.txt` describing [SQLite's public-domain status](https://sqlite.org/copyright.html). Afdian is an external platform accessed through its [official developer API](https://guide.afdian.com/creator/developer); no Afdian service, merchant credentials, or payment approval is bundled. The account/payment/credit implementation is original project code, not copied from VRCLS or AGPL integration projects. This notice does not add a license for the project's original source.
+
 ## Local Japanese OCR runtime
 
 The `local-ocr-runtime/` directory contains the separately licensed local inference runtime. Its `runtime-manifest.json` records the exact Python and dependency versions, source URLs, and model SHA256 hashes used in this distribution. Do not remove the bundled licenses when copying or distributing that directory.

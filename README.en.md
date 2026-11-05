@@ -20,8 +20,9 @@ Read the text in front of you in SteamVR: hold a controller button to capture th
 - **Direct image analysis:** send the screenshot directly to a vision model, which organizes the translation or a brief explanation to suit the image.
 - **Local OCR:** Tesseract for printed text and a separate NDLOCR-Lite engine for Japanese recognition. The recognition stage can run locally.
 - **Multiple translation services:** an existing Codex login, cloud or local OpenAI-compatible APIs, and a background Google Translate webpage.
+- **Accounts and credits:** connect to a self-hosted credit server, buy usage packs through Afdian, and view orders and transactions. A complete successful translation costs one credit; your own providers do not consume server credits.
 - **Optional region selection:** use both controllers to draw a rectangle, translate only that region, and keep the result fixed in SteamVR tracking space.
-- **Save problem samples:** manually save the current screenshot from the workspace. Normal use does not automatically create a screenshot or translation history.
+- **Save problem samples:** manually save the current screenshot from the workspace. Your own providers do not create translation history; the credit server retains recent results for recovery after a disconnect.
 
 ## Requirements
 
@@ -38,7 +39,7 @@ The desktop interface is currently mainly in Simplified Chinese. This repository
 1. Download the Windows archive from [Releases](https://github.com/pan0001/mugonzei-honyakuki/releases) and **extract the entire archive** into a writable directory. Do not copy just the `.exe`.
 2. Start SteamVR, connect your headset, enter the game, then run `SteamVrTranslator.exe`. A three-step setup wizard opens automatically on first launch.
 3. In step one, choose the translation service, 「识图方式」 (Image Recognition Mode), and target language. The defaults are local Codex + 「本地OCR（不推荐）」 (Local OCR, not recommended); this does not automatically upload screenshots to a model.
-4. In step two, configure Codex, your API, or Google. You can leave the Codex model blank; reasoning effort defaults to 「自动（按阶段）」 (Automatic by Stage). APIs require an address and model; a local service without authentication can leave the key blank. Google can only be paired with local OCR or local Japanese OCR.
+4. In step two, configure Codex, your API, Google, or 「积分服务（爱发电）」 (Credit Service / Afdian). You can leave the Codex model blank; reasoning effort defaults to 「自动（按阶段）」 (Automatic by Stage). APIs require an address and model; a local service without authentication can leave the key blank. Google can only be paired with local OCR or local Japanese OCR. For the credit service, enter the operator's HTTPS server address; after completing the wizard, open 「账号与积分」 (Account and Credits) to register or sign in and top up.
 5. In step three, choose the capture source and review the hotkeys, VR controller settings, and summary, then click 「保存并开始」 (Save and Start). Only after completion does the app open the workspace, connect to SteamVR, and enable hotkeys.
 6. Face the text and hold the left X button. **When the ring fills at 1.5 seconds, the app captures the view and starts translation.** Release the button and wait for the subtitles. Recognition and translation take additional time; the hold timer is not the total waiting time.
 7. If you no longer need that translation, keep holding until **3 seconds**. When the second ring fills, the task is canceled and the subtitles are hidden. Release the button before holding it again to take a new screenshot.
@@ -74,6 +75,18 @@ Further changes are delivered through incremental commits and released under new
 AI handwriting recognition usually makes two vision requests, with one additional text request for translation. It therefore takes more time and usage than a single direct image request. Enlarging an image cannot restore strokes that are blurred, obscured, or missing from the original. NDLOCR-Lite's Japanese recognition capability does not mean it can correctly recognize all mixed Chinese, Japanese, and English handwriting.
 
 ## Configuring a translation service
+
+### Credit service and Afdian
+
+Select 「积分服务（爱发电）」 in setup or AI settings and enter the operator's HTTPS server address. After saving, open 「账号与积分」 to register or sign in, choose a usage pack, pay on Afdian, then refresh orders and balance. The default `http://127.0.0.1:5187` is for a development server you run yourself. No live payment service is bundled or preconfigured.
+
+- One complete successful task costs **one credit**, including all recognition and translation stages. Image/handwriting mode transcribes Chinese, Japanese, or English before translating, and does not generate scene descriptions for text-free images. Local OCR modes only send recognized text.
+- No text, failure, or cancellation before server completion costs nothing. Hiding a completed result does not refund it. Repeatedly querying the same task does not charge again; use the account window to recover the latest task after a disconnect.
+- Afdian notifications trigger an authenticated server-side order query before crediting. Orders are credited once; mismatched amount, plan, or account association is rejected.
+- Local recognition-only remains free. AI recognition-only is available through your own Codex/API, not the credit service. Existing providers and settings are preserved.
+- Session tokens are isolated by server address and protected using Windows DPAPI. Afdian and upstream AI keys stay on the server. Accounts, orders, ledger entries, and recent source/translated text are stored server-side; images are used only during task processing.
+
+Deploy the server separately and configure Afdian creator/developer access, actual plans, and an AI provider. Live payments are disabled by default. Local mock payments take no money and mock translation calls no real AI. See the [server guide](server/README.md) for deployment, APIs, tests, and refund operations. This implementation uses the official protocol independently; it incorporates no VRCLS or other AGPL project code.
 
 ### Codex
 
@@ -130,7 +143,7 @@ The frame is fixed in SteamVR tracking space. It does not automatically follow g
 - Cloud vision models receive screenshots. With local OCR, only the recognized text is sent to the selected translation service. The entire process can be offline only when both recognition and translation use local services.
 - Codex and local Japanese OCR create temporary PNG files and attempt to clean them up on completion, failure, or cancellation. Forced termination or a power outage can leave temporary files behind.
 - The Google webpage uses a separate `GoogleWebView2/` data directory. It does not share your personal browser login, but it retains website cookies and cache.
-- Normal use does not automatically save screenshots or translation history. 「保存当前截图」 (Save Current Screenshot) is a manual user action. Development diagnostic commands separately write images, source text, or result reports.
+- The desktop app does not automatically save screenshots; 「保存当前截图」 (Save Current Screenshot) is a manual action. Your own providers do not save translation history. The credit server retains recent source text and translations for recovery, plus order and credit records. Development diagnostics separately write images, source text, or result reports.
 - Redact private information before submitting an issue. Do not upload settings, credentials, personal screenshots, or entire diagnostic directories.
 
 ## Building from source

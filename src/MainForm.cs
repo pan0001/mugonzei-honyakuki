@@ -153,7 +153,8 @@ internal sealed partial class MainForm : Form
 
     private void LoadSettings()
     {
-        backend.SelectedIndex = settings.TranslationBackend switch { "OpenAI" => 1, "GoogleTranslate" => 2, _ => 0 };
+        backend.SelectedIndex = settings.TranslationBackend switch { "OpenAI" => 1, "GoogleTranslate" => 2, "Credits" => 3, _ => 0 };
+        creditServer.Text = settings.CreditServerUrl;
         processingMode.SelectedIndex = settings.ProcessingMode switch { "Image" => 1, "Handwriting" => 2, "LocalJapanese" => 3, _ => 0 };
         codexPath.Text = settings.CodexExecutablePath; codexModel.Text = settings.CodexModel;
         codexReasoningEffort.SelectedIndex = settings.CodexReasoningEffort switch { "low" => 1, "medium" => 2, "high" => 3, _ => 0 };
@@ -178,10 +179,13 @@ internal sealed partial class MainForm : Form
         bool useCodex = backend.SelectedIndex == 0;
         bool useApi = backend.SelectedIndex == 1;
         bool useGoogle = backend.SelectedIndex == 2;
+        bool useCredits = backend.SelectedIndex == 3;
         bool testing = apiVisionCheck is not null || googleTranslationCheck is not null;
         codexSettingsCard.Visible = useCodex;
         apiSettingsCard.Visible = useApi;
         googleSettingsCard.Visible = useGoogle;
+        creditSettingsCard.Visible = useCredits;
+        creditServer.Enabled = creditAccountButton.Enabled = useCredits && !testing;
         backend.Enabled = processingMode.Enabled = !testing;
         codexPath.Enabled = codexModel.Enabled = codexReasoningEffort.Enabled = useCodex;
         checkCodexLogin.Enabled = useCodex && loginCheck is null;
@@ -199,7 +203,14 @@ internal sealed partial class MainForm : Form
         localOcrSettingsCard.Visible = localJapanese;
         if (localJapanese) localOcrStatus.Text = LocalJapaneseOcrService.GetAvailabilityMessage();
         showSource.Enabled = !directImage;
-        dataNote.Text = useGoogle
+        dataNote.Text = useCredits
+            ? (directImage || handwriting
+                ? "截图将发送给积分服务，由服务端识别中、日、英文字并翻译。服务使用的模型由运营者配置。"
+                : "图片在本机识别，只有识别原文发送给积分服务进行翻译。")
+                + "\n完整翻译成功扣 1 积分；无文字、失败或服务端完成前取消不扣。重复查询同一任务不会重复扣分。"
+                + "\n服务端已完成后隐藏字幕不会退回积分；断线时可在「账号与积分」找回最近结果。"
+                + "\n服务端保存订单、消费记录和近期原文/译文用于恢复。截图仅用于本次处理；AI 仅识别请使用自备服务或本地 OCR。"
+            : useGoogle
             ? (directImage || handwriting
                 ? "Google Translate 只接受文字，无法直接识图或运行 AI 手写 OCR。\n请将识别方式改为「本地 OCR」或「本地日语手写 OCR」，再保存。"
                 : "截图在本机 OCR 识别，只有识别出的文字会发送给 Google Translate；图片、API 密钥和聊天历史不会发送。\n「仅识别」不联网翻译。Google Translate 自动判断源语言，译文显示在下方字幕。")
@@ -229,13 +240,16 @@ internal sealed partial class MainForm : Form
     internal bool HasPendingAiSettings =>
         settings.ProcessingMode != SelectedProcessingMode
         || settings.TranslationBackend != SelectedBackend
+        || settings.CreditServerUrl != creditServer.Text.Trim()
         || settings.CodexExecutablePath != codexPath.Text.Trim() || settings.CodexModel != codexModel.Text.Trim()
         || settings.CodexReasoningEffort != SelectedCodexReasoningEffort
         || settings.ApiBaseUrl != endpoint.Text.Trim() || settings.ApiModel != model.Text.Trim()
         || settings.ApiImageDetail != SelectedApiImageDetail || settings.ApiStream != apiStream.Checked
         || settings.ApiKey != apiKey.Text.Trim() || settings.TargetLanguage != target.Text.Trim();
 
-    private string ReadyMessage() => settings.TranslationBackend == "GoogleTranslate"
+    private string ReadyMessage() => settings.TranslationBackend == "Credits"
+        ? "就绪 · 积分服务，完整翻译成功扣 1 积分；请先在「AI 服务 → 账号与积分」登录。"
+        : settings.TranslationBackend == "GoogleTranslate"
         ? "就绪 · 本地 OCR → Google Translate 后台网页，按 " + settings.Hotkey + " 翻译；可在「AI 服务」测试连接。"
         : settings.ProcessingMode == "LocalJapanese"
         ? "就绪 · 本地日语手写 OCR，按 " + settings.Hotkey + " 识别并翻译；「仅识别日语（本地）」可离线使用。"
@@ -245,7 +259,7 @@ internal sealed partial class MainForm : Form
 
     private string SelectedApiImageDetail => apiImageDetail.SelectedIndex switch { 1 => "High", 2 => "Low", 3 => "Auto", _ => "Default" };
     private string SelectedCodexReasoningEffort => codexReasoningEffort.SelectedIndex switch { 1 => "low", 2 => "medium", 3 => "high", _ => "" };
-    private string SelectedBackend => backend.SelectedIndex switch { 1 => "OpenAI", 2 => "GoogleTranslate", _ => "Codex" };
+    private string SelectedBackend => backend.SelectedIndex switch { 1 => "OpenAI", 2 => "GoogleTranslate", 3 => "Credits", _ => "Codex" };
 
     private string SelectedProcessingMode => processingMode.SelectedIndex switch { 1 => "Image", 2 => "Handwriting", 3 => "LocalJapanese", _ => "Ocr" };
 
@@ -367,6 +381,7 @@ internal sealed partial class MainForm : Form
     internal AppSettings ReadSettingsDraft() => new()
         {
             TranslationBackend = SelectedBackend,
+            CreditServerUrl = creditServer.Text.Trim(),
             ProcessingMode = SelectedProcessingMode,
             CodexExecutablePath = codexPath.Text.Trim(), CodexModel = codexModel.Text.Trim(),
             CodexReasoningEffort = SelectedCodexReasoningEffort,
@@ -450,6 +465,11 @@ internal sealed partial class MainForm : Form
     private async Task CaptureAndTranslate(bool ocrOnly, string source = "桌面按钮", long gestureId = 0, SelectionCaptureSnapshot? selection = null)
     {
         if (closing || setupDialogOpen) return;
+        if (ocrOnly && settings.TranslationBackend == "Credits" && settings.ProcessingMode is "Image" or "Handwriting")
+        {
+            SetStatus("积分服务提供完整识别与翻译，每次成功扣 1 分。仅识别可选择本地 OCR、本地日语 OCR 或自备 AI 服务。");
+            return;
+        }
         if (apiVisionCheck is not null) { SetStatus("API 图片测试进行中，请等待完成或先取消测试。"); return; }
         if (googleTranslationCheck is not null) { SetStatus("谷歌翻译测试进行中，请等待完成或先取消测试。"); return; }
         if ((settings.ProcessingMode != SelectedProcessingMode || !ocrOnly || settings.ProcessingMode is "Handwriting" or "Image") && HasPendingAiSettings)
@@ -536,6 +556,12 @@ internal sealed partial class MainForm : Form
             captured = true;
             imageBox.Text = $"截图 #{number} · {DateTime.Now:HH:mm:ss.fff} · {request.Source} · {cropped.Width} × {cropped.Height}";
             imageBox.Refresh();
+            if (!ocrOnly && settings.TranslationBackend == "Credits" && settings.ProcessingMode is "Image" or "Handwriting")
+            {
+                byte[] png = await Task.Run(() => VisionImage.PrepareForRecognition(cropped), token);
+                await RunCreditTranslationAsync(request, started, null, png, token);
+                return;
+            }
             if (!ocrOnly && settings.ProcessingMode == "Image")
             {
                 sourceText.Text = "直接识图模式：将本次截图发送给模型，未运行本地 OCR。\r\n模型会自行组织识别与翻译结果。";
@@ -587,6 +613,11 @@ internal sealed partial class MainForm : Form
             {
                 SetStatus($"{(handwriting ? "手写原文识别" : aiTranscription ? "AI 原文识别" : "本地识别")}完成 · {text.Length} 字符 · {started.Elapsed.TotalSeconds:F1} 秒");
                 SetPages(RenderResultPages(text, title: handwriting ? "手写原文" : "识别原文"), request.GestureId, activeAnchor); return;
+            }
+            if (settings.TranslationBackend == "Credits")
+            {
+                await RunCreditTranslationAsync(request, started, text, null, token);
+                return;
             }
             if (settings.TranslationBackend == "OpenAI" && string.IsNullOrWhiteSpace(settings.ApiModel))
             {
