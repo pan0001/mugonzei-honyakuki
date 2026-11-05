@@ -85,6 +85,34 @@ public sealed class CreditServiceClient : IDisposable
     public Task<CreditPlan[]> GetPlansAsync(CancellationToken token = default) => SendAsync<CreditPlan[]>(HttpMethod.Get, "v1/plans", null, RequireSession(), token);
     public Task<CreditOrder[]> GetOrdersAsync(CancellationToken token = default) => SendAsync<CreditOrder[]>(HttpMethod.Get, "v1/orders", null, RequireSession(), token);
 
+    public async Task<CreditRedemptionResult> RedeemAsync(string code, CancellationToken token = default)
+    {
+        token.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(code) || code.Length > 256)
+            throw new InvalidOperationException("请输入有效兑换码，格式为 MU 后接 8 组四位字母或数字。");
+        string compact = string.Concat(code.Where(c => !char.IsWhiteSpace(c) && c != '-')).ToUpperInvariant();
+        if (compact.Length != 34 || !compact.StartsWith("MU", StringComparison.Ordinal)
+            || compact.AsSpan(2).ContainsAnyExcept("0123456789ABCDEF"))
+            throw new InvalidOperationException("请输入有效兑换码，格式为 MU 后接 8 组四位十六进制字符。");
+        string normalized = "MU-" + string.Join("-", Enumerable.Range(0, 8).Select(i => compact.Substring(2 + i * 4, 4)));
+        CreditRedemptionResult result;
+        try
+        {
+            // Codes only exist in this request; sessions and recent-task storage never receive them.
+            result = await SendAsync<CreditRedemptionResult>(HttpMethod.Post, "v1/redemptions", new { code = normalized }, RequireSession(), token).ConfigureAwait(false);
+        }
+        catch (CreditServiceException error) when (error.StatusCode == HttpStatusCode.BadRequest)
+        { throw new CreditServiceException("兑换码不可用，请确认兑换码及有效期；本次未扣积分。", error.StatusCode); }
+        catch (CreditServiceException error) when (error.StatusCode == HttpStatusCode.Conflict)
+        { throw new CreditServiceException("账户余额已达上限，暂时无法兑换，请联系服务运营者。", error.StatusCode); }
+        catch (CreditServiceException error) when (error.IsTransient)
+        { throw new CreditServiceException("兑换结果尚未确认。请刷新余额，或在同一账户重新输入此兑换码并重试；不会重复入账。", error.StatusCode, isTransient: true); }
+        if (result.Credits <= 0 || result.Balance < 0 || result.Reserved < 0 || result.Reserved > result.Balance
+            || string.IsNullOrWhiteSpace(result.Reference) || result.Reference.Length > 128 || result.Reference.Any(char.IsControl))
+            throw InvalidResponse();
+        return result;
+    }
+
     public Task<CreditOrder> CreateOrderAsync(string planId, Guid requestId, CancellationToken token = default)
     {
         if (string.IsNullOrWhiteSpace(planId) || planId.Length > 128 || planId.Any(char.IsControl) || requestId == Guid.Empty)
@@ -297,6 +325,14 @@ public sealed class CreditAccount
     public string Username { get; set; } = "";
     public long Balance { get; set; }
     public long Reserved { get; set; }
+}
+public sealed class CreditRedemptionResult
+{
+    public int Credits { get; set; }
+    public long Balance { get; set; }
+    public long Reserved { get; set; }
+    public bool AlreadyRedeemed { get; set; }
+    public string Reference { get; set; } = "";
 }
 public sealed class CreditLedgerEntry
 {

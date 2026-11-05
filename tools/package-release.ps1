@@ -62,6 +62,7 @@ function Test-ExcludedPath([string]$RelativePath) {
     # Do not traverse or read accidental local user artifacts in a reused publish directory.
     if ($name -match '(^|/)(artifacts|screenshots|captures|CreditSessions|data|GoogleWebView2|[^/]+\.WebView2|\.git|\.codex)(/|$)') { return $true }
     if ($name -match '\.(db|db-shm|db-wal|sqlite|sqlite-shm|sqlite-wal)$') { return $true }
+    if ($name -match '(^|/)(redemption|redeem)-codes[^/]*\.json$') { return $true }
     if ($name -match '(^|/)(settings\.json|auth\.json|credentials\.json|\.env(?:\..*)?|runtime-faults\.jsonl(?:\.previous)?|[^/]*-diagnostics\.json|baseline-[^/]*\.json)$') { return $true }
     return $false
 }

@@ -55,6 +55,16 @@
     <section id="dashboard" class="account-dashboard" aria-labelledby="dashboard-title" hidden>
       <div class="section-heading"><div><p class="eyebrow">MY ACCOUNT</p><h2 id="dashboard-title">你好，<span id="account-username"></span></h2></div><div class="inline-actions"><button id="refresh-account" type="button" class="button button-ghost button-small">刷新账户</button><button id="logout" type="button" class="button button-ghost button-small">退出登录</button></div></div>
       <div class="balance-grid" aria-label="积分余额"><div class="balance-card"><span>可用积分</span><strong class="balance-value" id="available-balance">—</strong><small>可用于新的翻译</small></div><div class="balance-card"><span>总余额</span><strong class="balance-value" id="total-balance">—</strong><small>包含暂时预留的积分</small></div><div class="balance-card"><span>预留中</span><strong class="balance-value" id="reserved-balance">—</strong><small>进行中的翻译或退款</small></div></div>
+      <section class="panel redemption-panel" aria-labelledby="redemption-title">
+        <div class="section-heading"><h3 id="redemption-title">兑换积分</h3><span class="muted">已有兑换码</span></div>
+        <form id="redemption-form" class="redemption-form" method="post" action="/v1/redemptions" autocomplete="off">
+          <div class="form-row"><label for="redemption-code">兑换码</label><input id="redemption-code" name="code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" required minlength="20" maxlength="80" placeholder="MU-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" aria-describedby="redemption-hint redemption-availability"></div>
+          <button id="redemption-submit" class="button button-primary" type="submit">兑换积分</button>
+        </form>
+        <p class="form-hint" id="redemption-hint">粘贴完整兑换码；服务器会统一处理大小写、空格和短横线。每个兑换码只能到账一次，同一账户重试不会重复到账。</p>
+        <p class="form-hint" id="redemption-availability">没有充值方案时也可兑换。积分到账不代表托管 AI 已开放，翻译服务状态以客户端实际返回为准。</p>
+        <p id="redemption-message" class="status-message" role="status" aria-label="兑换结果" aria-live="polite" aria-atomic="true" hidden></p>
+      </section>
       <div class="account-grid">
         <section class="panel" aria-labelledby="plans-title"><div class="section-heading"><h3 id="plans-title">补充一点理解力</h3><span class="muted">积分充值</span></div><p class="muted">选择方案后创建订单，再前往爱发电付款。积分到账以服务器核验结果为准。</p><div id="plans" class="plan-list"><p class="empty-state">正在读取方案…</p></div><div id="checkout-message" class="status-message" role="status" aria-live="polite" hidden></div></section>
         <aside class="panel account-help"><p class="eyebrow">在客户端使用</p><h3>同一个账户，无缝继续。</h3><ol class="account-steps"><li>在桌面客户端选择「积分服务」。</li><li>服务地址填写 <code>https://api.mugonzei.top</code>。</li><li>登录此账户，查看余额和服务状态。</li></ol><p class="form-hint">托管 AI 是否可用，以客户端实际返回为准。账户可登录不代表翻译服务已开放。</p><a class="text-link" href="/#main">还没有客户端？去下载 ↗</a></aside>

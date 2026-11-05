@@ -8,6 +8,7 @@ using Microsoft.AspNetCore.RateLimiting;
 using Mugonzei.Server;
 
 if (args.Length > 0 && args[0] == "refund") { Environment.ExitCode = RefundCommands.Run(args); return; }
+if (args.Length > 0 && args[0] == "codes") { Environment.ExitCode = RedemptionCommands.Run(args); return; }
 var builder = WebApplication.CreateBuilder(args);
 var options = ServerOptions.Load(builder.Configuration, builder.Environment);
 using var databaseLease = new DatabaseLease(options.DatabasePath);
@@ -57,6 +58,7 @@ builder.Services.AddRateLimiter(limits =>
         (perUser ? context.Items["userId"] as string : null) ?? context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
         _ => new FixedWindowRateLimiterOptions { PermitLimit = count, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
     Policy("auth", 10); Policy("payment", 20, true); Policy("webhook", 60); Policy("translation-submit", 20, true);
+    Policy("redemption", 10, true);
     Policy("translation-cancel", 60, true);
 });
 
@@ -108,6 +110,8 @@ app.MapPost("/v1/auth/login", (Credentials input, AuthService auth) => auth.Logi
 app.MapPost("/v1/auth/logout", (HttpContext context, AuthService auth) => { auth.Logout(context); return Results.NoContent(); });
 app.MapGet("/v1/account", (HttpContext context, Store store) => store.GetAccount(AuthService.UserId(context)));
 app.MapGet("/v1/ledger", (HttpContext context, Store store) => store.GetLedger(AuthService.UserId(context)));
+app.MapPost("/v1/redemptions", (RedeemCodeRequest input, HttpContext context, Store store) =>
+    store.RedeemCode(AuthService.UserId(context), input.Code)).RequireRateLimiting("redemption");
 app.MapGet("/v1/plans", () => options.Plans.Select(plan => new { plan.Id, plan.Name, plan.Credits, plan.AmountFen }));
 
 object OrderReply(HttpContext context, OrderRecord order)

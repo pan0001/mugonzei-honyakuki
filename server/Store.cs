@@ -12,7 +12,7 @@ public sealed record OrderRecord(string Id, string UserId, string RequestId, str
 public sealed record RefundRecord(string Id, string OrderId, string Status, int Credits, DateTimeOffset CreatedAt);
 
 /// <summary>All monetary state transitions occur in immediate SQLite transactions.</summary>
-public sealed class Store
+public sealed partial class Store
 {
     private readonly string connectionString;
     public Store(string databasePath)
@@ -49,6 +49,7 @@ public sealed class Store
             CREATE INDEX IF NOT EXISTS ledger_user_created ON ledger(user_id,id);
             CREATE INDEX IF NOT EXISTS orders_user_created ON orders(user_id,created_at);
             """);
+        InitializeRedemptionSchema(db);
     }
 
     private SqliteConnection Open()

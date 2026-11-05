@@ -21,7 +21,7 @@ Linux x64 发行包为 framework-dependent，不包含 .NET 运行时。目标�
 维护者可在仓库根目录用 PowerShell 7 打包既有 publish 目录；脚本不构建或启动服务：
 
 ```powershell
-dotnet publish server/Mugonzei.Server.csproj -c Release -r linux-x64 --self-contained false -p:UseAppHost=false -o dist/Mugonzei-Server-linux-x64-v0.2.0-preview
+dotnet publish server/Mugonzei.Server.csproj -c Release -r linux-x64 --self-contained false -p:UseAppHost=false -o dist/Mugonzei-Server-linux-x64-v0.2.1-preview
 ./tools/package-server-release.ps1
 ```
 
@@ -72,6 +72,7 @@ dotnet run --project server/Mugonzei.Server.csproj
 | POST | `/v1/auth/logout` | 撤销当前会话 |
 | GET | `/v1/account` | `{username,balance,reserved}`，可用积分 = balance − reserved |
 | GET | `/v1/ledger` | 最近 200 条流水 |
+| POST | `/v1/redemptions` | `{code}` → `{credits,balance,reserved,alreadyRedeemed,reference}`，兑换一次性积分码 |
 | GET | `/v1/plans` | 服务端计划列表，金额单位为人民币分 |
 | POST | `/v1/orders` | `{planId,requestId}`，requestId 为 UUID；相同请求只创建一次 |
 | GET | `/v1/orders` | 最近 100 条账户订单 |
@@ -82,6 +83,27 @@ dotnet run --project server/Mugonzei.Server.csproj
 | POST | `/v1/translations/{requestId}/cancel` | 取消尚未结算任务 |
 
 认证错误返回 `{error,message}`，不返回密钥、上游响应正文或原文。注册/登录限每来源 IP 每分钟 10 次，订单操作和翻译提交各限每账户每分钟 20 次，Webhook 限每来源 IP 每分钟 60 次；超过返回 429。翻译上传全局最多 4 个并发，其余立即拒绝，可使用相同请求编号重试；结果轮询不消耗提交配额，取消使用独立的每账户 60 次/分钟配额。认证与支付请求体上限 32 KiB，图片任务另有有界 PNG/base64 限制。
+
+## 积分兑换码
+
+登录后可在网站账户中心或桌面「账号与积分」粘贴运营者发放的码。一个码只能归属一个账户；同一账户再次提交会返回 `alreadyRedeemed=true` 和当前余额，不重复加积分。响应丢失时应使用同一账户重试同一个码。兑换没有手续费，也不调用支付或 AI；积分到账不代表托管翻译已配置。
+
+码为 `MU-` 加八组四位十六进制字符，使用 128 位密码学随机数。服务器接受大小写、空白和连字符差异，仅保存标准化码的 SHA-256。客户端不能指定积分、有效期或归属。无效、过期、撤销或被其他账户使用统一返回 `400 redemption_unavailable`；余额溢出返回 `409 credit_limit`，保留未使用的码。每账户每分钟最多 10 次兑换请求，超过返回 429，独立于翻译/订单配额。
+
+认领码、增加余额和 `redemption` 流水在同一 SQLite 即时事务内完成；并发竞争仅一个账户成功，数据库失败会整体回滚。新增表自动创建，不改变现有账户、订单、余额或配置。已有兑换记录不会因到期变成可再次领取。
+
+管理员在服务器本地使用 `codes create/list/revoke`，没有公开的生成或管理 API。与退款管理相同，**必须先停止占用同一数据库的服务，完成后启动**。必须指定已有数据库；命令不会创建空账户库。Linux 权限及命令见[兑换码管理](deploy/README.md#兑换码管理)。
+
+```sh
+# 在受保护的维护环境执行，MUGONZEI_DATABASE 指向已有数据库。
+dotnet Mugonzei.Server.dll codes create --credits 100 --count 10 --output /private/redemption-codes-batch.json --note launch
+dotnet Mugonzei.Server.dll codes list --limit 100
+dotnet Mugonzei.Server.dll codes revoke --id <生成记录的UUID>
+```
+
+每批 1–1000 个，每码 1–1000000 积分。默认 30 天后过期；可传 `--expires 2027-01-01T00:00:00Z` 指定未来十年内时间，或 `--no-expiry` 明确永久有效。备注最多 120 字。导出要求新的绝对 JSON 路径，不覆盖现有文件；Unix 以 0600 创建。明文只出现在该导出文件，标准输出和 `list` 只有元数据。导出失败会尝试撤销该批生成的码，请检查列表后换新文件重试。不可恢复遗失的明文码，可撤销未兑换记录再生成。
+
+导出包含可直接领取积分的凭据，保存在网站目录、发行包和 Git 之外；不要贴进日志或公开仓库。撤销操作对已撤销的码幂等；已入账的码不能撤销或据此扣回用户积分。`list` 状态为 `active/expired/revoked/redeemed`，只列最近记录和内部 ID，不显示可兑换码或摘要。
 
 ## 爱发电与到账
 

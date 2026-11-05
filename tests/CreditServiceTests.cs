@@ -16,6 +16,7 @@ public static class CreditServiceTests
         ValidateAddresses();
         ProtectedSessions();
         await AuthenticationAndAccountContract();
+        await RedemptionContract();
         await RecoverWithoutResubmission();
         await MissingAfterDisconnectReusesId();
         await CancellationUsesIndependentToken();
@@ -112,6 +113,91 @@ public static class CreditServiceTests
         Equal("order-1", (await client.GetOrderAsync("order-1", true)).Id, "refresh order contract");
         await client.LogoutAsync(); Equal(null, temp.Store.Load(Endpoint), "logout removes local session");
         await ExpectAsync<InvalidOperationException>(() => client.GetAccountAsync(), "登录");
+    }
+
+    private static async Task RedemptionContract()
+    {
+        const string code = "MU-0123-4567-89AB-CDEF-0123-4567-89AB-CDEF";
+        using var temp = Authenticated();
+        Guid recent = Guid.NewGuid(); temp.Store.RememberTask(Endpoint, Secret, recent);
+        var savedFiles = Directory.GetFiles(temp.Path).ToDictionary(path => path, File.ReadAllBytes);
+        int requests = 0;
+        using (var client = Client(temp, async (request, token) =>
+        {
+            requests++;
+            Equal(HttpMethod.Post, request.Method, "redemption uses POST");
+            Equal("/base/v1/redemptions", request.RequestUri!.AbsolutePath, "redemption retains configured base path");
+            Equal("", request.RequestUri.Query, "code never appears in URL query");
+            Equal(Secret, request.Headers.Authorization?.Parameter, "redemption uses the destination-bound bearer session");
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
+            Equal(1, body.RootElement.EnumerateObject().Count(), "redemption body cannot select an amount or beneficiary");
+            Equal(code, body.RootElement.GetProperty("code").GetString(), "redemption normalizes casing and pasted whitespace");
+            return Response(new { credits = 10, balance = 31L, reserved = 2L, alreadyRedeemed = requests > 1, reference = "redemption:synthetic-id" });
+        }))
+        {
+            var first = await client.RedeemAsync(" \t" + code.ToLowerInvariant().Replace("-", " -\n") + " ");
+            Assert(first.Credits == 10 && first.Balance == 31 && first.Reserved == 2 && !first.AlreadyRedeemed,
+                "redemption amount and balance contract");
+            var retry = await client.RedeemAsync(code.Replace("-", ""));
+            Assert(retry.AlreadyRedeemed && retry.Reference == first.Reference, "same-code retry reports the prior redemption");
+            foreach (string invalid in new[] { "", "MU-1234", "MU-" + new string('G', 32), "MU-" + new string('\uff21', 32), new string('x', 257) })
+                await ExpectAsync<InvalidOperationException>(() => client.RedeemAsync(invalid), "兑换码");
+            using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
+            await ExpectAsync<OperationCanceledException>(() => client.RedeemAsync(code, cancelled.Token));
+            Equal(2, requests, "invalid and already cancelled redemptions never send requests");
+        }
+        Equal(recent, temp.Store.Load(Endpoint)!.RecentTaskId, "redemption never replaces translation recovery state");
+        Assert(Directory.GetFiles(temp.Path).Length == savedFiles.Count && savedFiles.All(pair => File.ReadAllBytes(pair.Key).AsSpan().SequenceEqual(pair.Value)),
+            "redeeming codes does not persist codes or rewrite the session file");
+
+        using (var loggedOut = new TemporarySessions())
+        using (var client = Client(loggedOut, (_, _) => throw new Exception("Logged-out redemption reached transport")))
+            await ExpectAsync<InvalidOperationException>(() => client.RedeemAsync(code), "登录");
+        foreach (var status in new[] { HttpStatusCode.BadRequest, HttpStatusCode.Conflict, HttpStatusCode.TooManyRequests, HttpStatusCode.Redirect })
+        {
+            int calls = 0;
+            using var client = Client(temp, (_, _) =>
+            {
+                calls++;
+                var response = Response(new { error = "private upstream text", code, token = Secret }, status);
+                response.Headers.Location = new Uri("https://other.example/" + code);
+                return Task.FromResult(response);
+            });
+            var error = await ExpectAsync<CreditServiceException>(() => client.RedeemAsync(code));
+            Assert(!error.ToString().Contains(code) && !error.ToString().Contains(Secret) && !error.ToString().Contains("private upstream text"),
+                "redemption errors never expose code, credentials or remote error body");
+            Equal(1, calls, "rejected redemption does not automatically retry or follow redirects");
+        }
+        int disconnectedCalls = 0;
+        using (var disconnected = Client(temp, (_, _) =>
+        {
+            disconnectedCalls++;
+            throw new HttpRequestException("synthetic transport diagnostics " + code);
+        }))
+        {
+            var error = await ExpectAsync<CreditServiceException>(() => disconnected.RedeemAsync(code), "同一账户");
+            Assert(error.IsTransient && !error.ToString().Contains(code), "ambiguous redemption gives a private safe-retry explanation");
+            Equal(1, disconnectedCalls, "an uncertain redemption result is not silently resubmitted");
+        }
+        using (var cancellation = new CancellationTokenSource())
+        using (var client = Client(temp, async (_, token) =>
+        {
+            cancellation.Cancel();
+            await Task.Delay(Timeout.Infinite, token);
+            throw new Exception("Cancelled redemption unexpectedly resumed");
+        }))
+            await ExpectAsync<OperationCanceledException>(() => client.RedeemAsync(code, cancellation.Token));
+        foreach (var invalid in new[]
+        {
+            new { credits = 0, balance = 1L, reserved = 0L, alreadyRedeemed = false, reference = "valid" },
+            new { credits = 1, balance = -1L, reserved = 0L, alreadyRedeemed = false, reference = "valid" },
+            new { credits = 1, balance = 1L, reserved = 2L, alreadyRedeemed = false, reference = "valid" },
+            new { credits = 1, balance = 1L, reserved = 0L, alreadyRedeemed = false, reference = "" }
+        })
+        {
+            using var malformed = Client(temp, (_, _) => Task.FromResult(Response(invalid)));
+            await ExpectAsync<CreditServiceException>(() => malformed.RedeemAsync(code), "响应格式");
+        }
     }
 
     private static async Task RecoverWithoutResubmission()

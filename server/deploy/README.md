@@ -131,6 +131,29 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://api.example.com/v1/account
 
 **回退：** 先停用代理 `systemctl disable --now caddy.service`，恢复应用 `MUGONZEI_TRUSTED_PROXIES=` 并重启 mugonzei，然后用前述 SSH 隧道连接。按原配置恢复 DNS/安全组规则，保留数据库和 `/var/lib/caddy`，不要删除私钥或账户数据。只回退 Caddyfile 时，恢复先前文件、validate 后 reload 即可；配置验证失败不要覆盖仍正常运行的服务。
 
+## 兑换码管理
+
+生成、查询及撤销只通过服务器本地 CLI，不向网站用户开放管理员接口。使用当前发行版本与数据库，先确认没有进行中的翻译，再进入维护；后台未配置 AI 时兑换仍可入账，但无法完成托管翻译。
+
+以 root 在维护 shell 中执行以下示例。导出目录位于数据库的受保护目录内，Caddy 无权限读取；每批使用新的文件名。`trap` 确保命令失败后也恢复服务。生成结果不会把明文码打印到终端。
+
+```sh
+(
+  set -eu
+  install -d -o mugonzei -g mugonzei -m 0700 /var/lib/mugonzei/admin
+  trap 'systemctl start mugonzei.service' EXIT
+  systemctl stop mugonzei.service
+  runuser -u mugonzei -- env MUGONZEI_DATABASE=/var/lib/mugonzei/mugonzei.db \
+    /opt/mugonzei/dotnet/dotnet /opt/mugonzei/current/Mugonzei.Server.dll \
+    codes create --credits 100 --count 10 \
+    --output /var/lib/mugonzei/admin/redemption-codes-batch-001.json --note launch
+)
+```
+
+默认 30 天有效；指定到期时间使用 `--expires 2027-01-01T00:00:00Z`，永久码须显式 `--no-expiry`。一次1–1000个，每码1–1000000积分。将上例 `codes create ...` 换为 `codes list --limit 100` 可查看无明文元数据，或 `codes revoke --id UUID` 撤销未领取码；这两种命令也要维护停服。不要复制包含明文码的导出到官网、Git、发行目录或工单日志。已兑码不能用撤销功能扣回积分。
+
+更新会自动新增兑换码表。先做一致性备份；回滚旧程序会关闭兑换入口，但已到账积分与流水仍在。网站和新版桌面客户端共用账户，不需要额外注册。用户提交过期/不可用码不会扣积分；同账户重试成功码不重复到账。
+
 ## 备份、更新与密钥
 
 数据库只支持一个服务进程。首次安装之外，不要覆盖 `server.env`；编辑后保持 `chmod 600 /etc/mugonzei/server.env`，重启服务才会加载新值。此文件使用 systemd `EnvironmentFile` 语法，不写 `export`；不要将真实密钥提交 Git、放进发行 ZIP、命令参数或终端截图。

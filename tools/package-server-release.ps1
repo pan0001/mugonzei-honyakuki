@@ -29,6 +29,7 @@ function Test-ExcludedPath([string]$RelativePath) {
     if ($name -match '(^|/)(data|env|keys|secrets|logs|artifacts|\.git|\.codex|CreditSessions)(/|$)') { return $true }
     if ($name -match '(^|/)(\.?env(?:\..*)?|keys?(?:\.[^/]+)?|libe_sqlite3\.a|appsettings(?:\.[^/]+)?\.json|settings\.json|auth\.json|credentials\.json|key-[^/]+\.xml)$') { return $true }
     if ($name -match '\.(pdb|db(?:-(?:shm|wal|journal)|\.lock)?|sqlite3?(?:-(?:shm|wal|journal)|\.lock)?|env|key|pem|pfx|p12|snk|log)$') { return $true }
+    if ($name -match '(^|/)(redemption|redeem)-codes[^/]*\.json$') { return $true }
     return $false
 }
 

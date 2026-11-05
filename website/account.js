@@ -15,6 +15,7 @@
   let refreshBusy = false;
   let dashboardRequest = null;
   let checkoutBusy = false;
+  let redemptionBusy = false;
   let checkoutOrderId = '';
   let plans = [];
 
@@ -48,6 +49,13 @@
     refreshBusy = false;
     dashboardRequest = null;
     checkoutBusy = false;
+    redemptionBusy = false;
+    $('redemption-code').value = '';
+    $('redemption-code').disabled = false;
+    $('redemption-submit').disabled = false;
+    $('redemption-submit').textContent = '兑换积分';
+    $('redemption-form').setAttribute('aria-busy', 'false');
+    redemptionMessage();
     authBusy = false;
     $('auth-submit').disabled = logoutBusy;
     $('auth-submit').textContent = mode === 'register' ? '创建账户 ↗' : '登录账户 ↗';
@@ -233,7 +241,7 @@
 
   function renderLedger(rows) {
     if (!rows.length) { tableMessage('ledger-body', '还没有积分变动。充值和使用记录会显示在这里。'); return; }
-    const labels = { recharge: '充值到账', translation: '翻译扣除', refund_hold: '退款预留', refund: '退款扣回', refund_release: '解除退款预留' };
+    const labels = { recharge: '充值到账', redemption: '兑换码', translation: '翻译扣除', refund_hold: '退款预留', refund: '退款扣回', refund_release: '解除退款预留' };
     const fragment = document.createDocumentFragment();
     for (const record of rows) {
       const row = node('tr');
@@ -376,6 +384,70 @@
     } catch (error) { if (current === generation) message(error.message, 'error'); }
     finally { button.disabled = false; button.textContent = '核验到账'; }
   }
+
+  function redemptionMessage(text = '', tone = 'info') {
+    const status = $('redemption-message');
+    status.textContent = text;
+    status.dataset.tone = tone;
+    status.hidden = !text;
+  }
+
+  async function redeemCredits() {
+    if (!token || logoutBusy || redemptionBusy) return;
+    const code = $('redemption-code').value.trim();
+    if (code.length < 20 || code.length > 80) {
+      redemptionMessage('请输入 20–80 个字符的完整兑换码。', 'error');
+      $('redemption-code').focus();
+      return;
+    }
+    const current = generation;
+    redemptionBusy = true;
+    $('redemption-code').disabled = true;
+    $('redemption-submit').disabled = true;
+    $('redemption-submit').textContent = '正在兑换…';
+    $('redemption-form').setAttribute('aria-busy', 'true');
+    redemptionMessage('正在核验兑换码，请稍候…');
+    try {
+      const result = await api('/redemptions', { method: 'POST', body: { code } });
+      if (current !== generation) return;
+      if (!Number.isSafeInteger(result?.credits) || result.credits < 1
+        || !Number.isSafeInteger(result.balance) || result.balance < 0
+        || !Number.isSafeInteger(result.reserved) || result.reserved < 0 || result.reserved > result.balance
+        || typeof result.alreadyRedeemed !== 'boolean' || typeof result.reference !== 'string' || !result.reference)
+        throw new ApiError('兑换响应不完整。');
+      $('redemption-code').value = '';
+      const summary = result.alreadyRedeemed
+        ? '此兑换码已在本账户兑换过 ' + formatNumber(result.credits) + ' 积分，本次没有重复增加积分。'
+        : '兑换成功，' + formatNumber(result.credits) + ' 积分已到账。';
+      redemptionMessage(summary + ' 正在刷新账户…', 'success');
+      // An earlier refresh may still hold the pre-redemption balance. Wait for
+      // it, then start a new read so that its result cannot overwrite the credit.
+      if (dashboardRequest) {
+        try { await dashboardRequest; } catch { /* The fresh read below can recover. */ }
+      }
+      if (current !== generation) return;
+      const refreshed = await loadDashboard();
+      if (current !== generation) return;
+      redemptionMessage(summary + (refreshed ? ' 余额和积分记录已刷新。' : ' 部分账户信息读取失败，请点击「刷新账户」。'), 'success');
+    } catch (error) {
+      if (current !== generation) return;
+      const detail = error.status === 400 ? '兑换码不可用，请核对后重试。'
+        : error.status === 409 ? '当前余额无法接收这些积分，请联系运营者。'
+        : error.status === 429 ? '兑换请求较频繁，请等待一分钟后重试。'
+        : '暂时无法确认兑换结果。请保留此码并重试；同一账户重复提交不会重复到账。';
+      redemptionMessage(detail, 'error');
+    } finally {
+      if (current === generation) {
+        redemptionBusy = false;
+        $('redemption-code').disabled = false;
+        $('redemption-submit').disabled = false;
+        $('redemption-submit').textContent = '兑换积分';
+        $('redemption-form').setAttribute('aria-busy', 'false');
+      }
+    }
+  }
+
+  $('redemption-form').addEventListener('submit', event => { event.preventDefault(); return redeemCredits(); });
 
   $('refresh-account').addEventListener('click', loadDashboard);
   $('logout').addEventListener('click', async () => {

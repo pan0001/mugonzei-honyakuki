@@ -13,7 +13,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Mugonzei.Server;
 
-internal static class Program
+internal static partial class Program
 {
     private const string Pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1kAAAAASUVORK5CYII=";
     private static int checks;
@@ -31,6 +31,7 @@ internal static class Program
             await CancellationRaces();
             await ProcessorTransport();
             await HttpContract();
+            await RedemptionTests();
             Console.WriteLine($"PASS official server: {checks} assertions; synthetic data and local/fake transports only.");
             return 0;
         }

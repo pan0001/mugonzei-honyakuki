@@ -7,6 +7,7 @@ public sealed class CreditAccountForm : Form
 {
     private readonly Func<string, CreditServiceClient> createClient;
     private readonly TextBox endpoint = Input("creditAccountServer"), username = Input("creditUsername"), password = Input("creditPassword");
+    private readonly TextBox redemptionCode = Input("creditRedemptionCode");
     private readonly Label status = Note("登录后可查看余额、购买次数包和恢复最近译文。"), balance = Note("尚未刷新账户");
     private readonly ComboBox plans = new UiComboBox { Name = "creditPlans", DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
     private readonly ListView ledger = Table("creditLedger", ("时间", 150), ("类型", 110), ("变动", 80), ("余额", 80), ("关联编号", 300));
@@ -35,6 +36,8 @@ public sealed class CreditAccountForm : Form
         StartPosition = FormStartPosition.CenterParent;
         endpoint.Text = ServerUrl; password.UseSystemPasswordChar = true;
         username.PlaceholderText = "3–32 位字母、数字、下划线或连字符"; password.PlaceholderText = "10–128 个字符；密码不会保存到本机";
+        redemptionCode.PlaceholderText = "MU- 后接 8 组四位字符；粘贴运营者提供的兑换码";
+        redemptionCode.MaxLength = 128; redemptionCode.UseSystemPasswordChar = true;
         BuildUi();
         FormClosing += (_, _) => { closing = true; lifetime.Cancel(); };
     }
@@ -88,6 +91,13 @@ public sealed class CreditAccountForm : Form
         actions.Controls.Add(ActionButton("清除本地登录", () => { EnsureClient().ClearLocalSession(); ClearDisplays(); status.Text = "本地登录已清除。服务器上的会话将按其有效期失效。"; return Task.CompletedTask; }));
         Add(stack, actions); Add(stack, balance);
         Add(stack, ActionButton("刷新余额、流水与订单", RefreshAll));
+        Add(stack, Note("兑换码"));
+        var redemption = new TableLayoutPanel { Dock = DockStyle.Top, AutoSize = true, ColumnCount = 2, Margin = Padding.Empty };
+        redemption.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); redemption.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        redemption.Controls.Add(Frame(redemptionCode), 0, 0);
+        var redeemButton = ActionButton("兑换积分", Redeem, primary: true); redeemButton.Name = "creditRedeemButton";
+        redemption.Controls.Add(redeemButton, 1, 0); Add(stack, redemption);
+        Add(stack, Note("同一兑换码仅入账一次，积分和有效期以服务器核验为准。网页与桌面同账户共享余额；兑换码不会保存在本机。"));
         Add(stack, Note("只有完整翻译成功才扣费；任务运行时可能预留积分。取消和断线后的最终结果以服务端记录为准。\n账户窗口中修改的服务地址会带回主界面，请在主界面保存设置后用于翻译。"));
     }
 
@@ -170,17 +180,19 @@ public sealed class CreditAccountForm : Form
     private async Task RefreshAll()
     {
         var service = EnsureClient();
+        var session = service.Session;
         var accountTask = service.GetAccountAsync(lifetime.Token);
         var ledgerTask = service.GetLedgerAsync(lifetime.Token);
         var plansTask = service.GetPlansAsync(lifetime.Token);
         var ordersTask = service.GetOrdersAsync(lifetime.Token);
         await Task.WhenAll(accountTask, ledgerTask, plansTask, ordersTask);
-        if (closing) return;
+        if (!IsCurrentSession(service, session)) return;
         var account = await accountTask;
         balance.Text = $"账户：{account.Username}    总余额：{account.Balance}    预留：{account.Reserved}    可用：{Math.Max(0, account.Balance - account.Reserved)} 积分";
         ledger.BeginUpdate(); ledger.Items.Clear();
         foreach (var row in (await ledgerTask).Take(1000)) ledger.Items.Add(new ListViewItem([
-            row.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss"), row.Kind, row.Amount.ToString("+0;-0;0"), row.Balance.ToString(), row.Reference]));
+            row.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss"), row.Kind == "redemption" ? "兑换码入账" : row.Kind,
+            row.Amount.ToString("+0;-0;0"), row.Balance.ToString(), row.Reference]));
         ledger.EndUpdate();
         string? selected = (plans.SelectedItem as CreditPlan)?.Id;
         plans.Items.Clear();
@@ -189,6 +201,29 @@ public sealed class CreditAccountForm : Form
         if (plans.SelectedIndex < 0 && plans.Items.Count > 0) plans.SelectedIndex = 0;
         PopulateOrders(await ordersTask);
         status.Text = "账户已刷新。";
+    }
+
+    private bool IsCurrentSession(CreditServiceClient service, CreditSession? session) => !closing
+        && !lifetime.IsCancellationRequested && ReferenceEquals(service, client) && session is not null
+        && service.Session?.Token == session.Token;
+
+    private async Task Redeem()
+    {
+        var service = EnsureClient();
+        var session = service.Session;
+        string submittedCode = redemptionCode.Text;
+        redemptionCode.Clear();
+        var result = await service.RedeemAsync(submittedCode, lifetime.Token);
+        if (!IsCurrentSession(service, session)) return;
+        balance.Text = $"账户：{session!.Username}    总余额：{result.Balance}    预留：{result.Reserved}    可用：{result.Balance - result.Reserved} 积分";
+        string confirmation = result.AlreadyRedeemed ? "此兑换码已入账到当前账户，本次未重复增加积分。" : $"兑换成功，已增加 {result.Credits} 积分。";
+        try { await RefreshAll(); }
+        catch (Exception) when (!closing && !lifetime.IsCancellationRequested)
+        {
+            if (IsCurrentSession(service, session)) status.Text = confirmation + " 列表刷新未完成，请稍后刷新。";
+            return;
+        }
+        if (IsCurrentSession(service, session)) status.Text = confirmation;
     }
 
     private async Task Purchase()
@@ -258,7 +293,7 @@ public sealed class CreditAccountForm : Form
         recent.Text = $"任务：{result.Id}\r\n状态：{(result.IsExpired ? "译文已过期" : result.Status)}    总余额：{result.Balance}\r\n\r\n原文\r\n{result.SourceText}\r\n\r\n译文\r\n{result.Translation}\r\n{result.Error}";
         status.Text = result.IsExpired ? result.Error : result.IsTerminal ? "最近任务已恢复，仅显示在本窗口。" : "任务仍在处理中，可稍后再次查询。";
     }
-    private void ClearDisplays() { balance.Text = "尚未刷新账户"; plans.Items.Clear(); orders.Items.Clear(); ledger.Items.Clear(); recent.Clear(); }
+    private void ClearDisplays() { balance.Text = "尚未刷新账户"; plans.Items.Clear(); orders.Items.Clear(); ledger.Items.Clear(); recent.Clear(); redemptionCode.Clear(); }
 
     private Button ActionButton(string label, Func<Task> action, bool primary = false)
     {
@@ -278,7 +313,7 @@ public sealed class CreditAccountForm : Form
     private void SetBusy(bool value)
     {
         foreach (var button in actionButtons) button.Enabled = !value;
-        endpoint.Enabled = username.Enabled = password.Enabled = plans.Enabled = !value;
+        endpoint.Enabled = username.Enabled = password.Enabled = redemptionCode.Enabled = plans.Enabled = !value;
     }
 
     protected override void Dispose(bool disposing)

@@ -31,4 +31,6 @@ server/data/
 **/credit-session*
 **/credit-tasks*
 **/CreditSessions/
+**/redemption-codes*.json
+**/redeem-codes*.json
 /data/
