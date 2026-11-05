@@ -1,0 +1,28 @@
+[Unit]
+Description=Mugonzei translation credit server
+After=network.target
+
+[Service]
+Type=simple
+User=mugonzei
+Group=mugonzei
+WorkingDirectory=/opt/mugonzei/current
+ExecStart=/opt/mugonzei/dotnet/dotnet /opt/mugonzei/current/Mugonzei.Server.dll
+EnvironmentFile=/etc/mugonzei/server.env
+StateDirectory=mugonzei
+StateDirectoryMode=0700
+UMask=0077
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=45
+NoNewPrivileges=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=/var/lib/mugonzei
+CapabilityBoundingSet=
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target

@@ -16,6 +16,8 @@ dotnet run --project server.tests/Mugonzei.Server.Tests.csproj -c Release
 
 Linux x64 发行包为 framework-dependent，不包含 .NET 运行时。目标主机须先安装 **.NET 10 ASP.NET Core Runtime**（包含所需的 .NET Runtime），解压后使用 `dotnet Mugonzei.Server.dll` 启动；仅安装基础 .NET Runtime 不足以运行此服务。
 
+使用 systemd 的单机部署见 [Linux 部署模板与步骤](deploy/README.md)，包含仅本机监听的配置、服务用户权限、SSH 隧道、备份和更新方式；模板默认关闭真实支付、模拟支付及 AI。
+
 维护者可在仓库根目录用 PowerShell 7 打包既有 publish 目录；脚本不构建或启动服务：
 
 ```powershell

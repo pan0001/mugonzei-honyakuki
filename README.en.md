@@ -88,6 +88,8 @@ Select 「积分服务（爱发电）」 in setup or AI settings and enter the o
 
 Deploy the server separately and configure Afdian creator/developer access, actual plans, and an AI provider. Live payments are disabled by default. Local mock payments take no money and mock translation calls no real AI. See the [server guide](server/README.md) for deployment, APIs, tests, and refund operations. This implementation uses the official protocol independently; it incorporates no VRCLS or other AGPL project code.
 
+See the [deployment guide](server/deploy/README.md) for initial Linux / systemd setup, SSH tunneling, and backups.
+
 ### Codex
 
 The app uses the Codex CLI's existing login; you do not need to enter an API key here. Leave the executable path blank for automatic detection. Leave the model blank to use the CLI's default selection. The app does not inherit the model setting from your personal `config.toml` or continue an existing chat.

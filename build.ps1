@@ -106,6 +106,11 @@ New-Item -ItemType Directory -Path $serverDocs -Force | Out-Null
 foreach ($document in @('README.md', 'configuration.example.txt')) {
     Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('server/' + $document)) -Destination (Join-Path $serverDocs $document) -Force
 }
+$serverDeployDocs = Join-Path $serverDocs 'deploy'
+New-Item -ItemType Directory -Path $serverDeployDocs -Force | Out-Null
+foreach ($document in @('README.md', 'mugonzei.service', 'server.env.example', 'build-sqlite-linux.py')) {
+    Copy-Item -LiteralPath (Join-Path $PSScriptRoot ('server/deploy/' + $document)) -Destination (Join-Path $serverDeployDocs $document) -Force
+}
 $workspaceImage = Join-Path $PSScriptRoot 'docs/images/workspace.png'
 if (-not (Test-Path -LiteralPath $workspaceImage -PathType Leaf)) { throw 'README workspace image is missing: docs/images/workspace.png' }
 $documentationImages = Join-Path $publishRoot 'docs/images'
