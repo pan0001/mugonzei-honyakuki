@@ -5,18 +5,30 @@ namespace Mugonzei.Server;
 
 public sealed partial class Store
 {
-    private static void InitializeEmailSchema(SqliteConnection db) => Execute(db, null, """
-        CREATE TABLE IF NOT EXISTS account_emails (
-          user_id TEXT PRIMARY KEY REFERENCES users(id), email TEXT NOT NULL UNIQUE, verified_at INTEGER NOT NULL);
-        CREATE TABLE IF NOT EXISTS registration_email_challenges (
-          email_key TEXT PRIMARY KEY, delivery_id TEXT NOT NULL, code_hash BLOB NOT NULL, expires_at INTEGER NOT NULL,
-          delivered INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0);
-        CREATE TABLE IF NOT EXISTS registration_email_requests (
-          email_key TEXT NOT NULL, ip_key TEXT NOT NULL, sent_at INTEGER NOT NULL);
-        CREATE INDEX IF NOT EXISTS email_requests_by_time ON registration_email_requests(sent_at);
-        CREATE INDEX IF NOT EXISTS email_requests_by_address ON registration_email_requests(email_key,sent_at);
-        CREATE INDEX IF NOT EXISTS email_requests_by_ip ON registration_email_requests(ip_key,sent_at);
-        """);
+    private static void InitializeEmailSchema(SqliteConnection db)
+    {
+        using var tx = db.BeginTransaction(deferred: false);
+        Execute(db, tx, """
+            CREATE TABLE IF NOT EXISTS account_emails (
+              user_id TEXT PRIMARY KEY REFERENCES users(id), email TEXT NOT NULL UNIQUE, verified_at INTEGER NOT NULL);
+            CREATE TABLE IF NOT EXISTS registration_email_challenges (
+              email_key TEXT PRIMARY KEY, delivery_id TEXT NOT NULL, code_hash BLOB NOT NULL, expires_at INTEGER NOT NULL,
+              delivered INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0);
+            CREATE TABLE IF NOT EXISTS registration_email_requests (
+              email_key TEXT NOT NULL, ip_key TEXT NOT NULL, sent_at INTEGER NOT NULL);
+            CREATE INDEX IF NOT EXISTS email_requests_by_time ON registration_email_requests(sent_at);
+            CREATE INDEX IF NOT EXISTS email_requests_by_address ON registration_email_requests(email_key,sent_at);
+            CREATE INDEX IF NOT EXISTS email_requests_by_ip ON registration_email_requests(ip_key,sent_at);
+            """);
+        using var existing = Command(db, tx, "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='registration_email_usage'");
+        if (existing.ExecuteScalar() is null)
+            Execute(db, tx, """
+                CREATE TABLE registration_email_usage (
+                  id INTEGER PRIMARY KEY CHECK(id=1), reserved INTEGER NOT NULL CHECK(reserved>=0));
+                INSERT INTO registration_email_usage(id,reserved) VALUES(1,0);
+                """);
+        tx.Commit();
+    }
 
     private static void PruneEmailData(SqliteConnection db, SqliteTransaction tx, long now)
     {
@@ -25,7 +37,7 @@ public sealed partial class Store
     }
 
     internal bool ReserveEmailDelivery(string email, string emailKey, string ipKey, string delivery, byte[] hash,
-        DateTimeOffset issued, int dailyLimit)
+        DateTimeOffset issued, int dailyLimit, long? totalLimit)
     {
         long now = issued.ToUnixTimeSeconds();
         using var db = Open();
@@ -41,6 +53,10 @@ public sealed partial class Store
             || Count("SELECT COUNT(*) FROM registration_email_requests WHERE ip_key=$ip AND sent_at>$cutoff", ("$ip", ipKey), ("$cutoff", now-3600)) >= 20
             || Count("SELECT COUNT(*) FROM registration_email_requests") >= dailyLimit)
             throw new ApiException(429, "email_rate_limited", "验证码请求过于频繁，请稍后重试。");
+        // Reserve before SMTP. A timeout or crash can happen after the relay has accepted the message.
+        if (Execute(db, tx, "UPDATE registration_email_usage SET reserved=reserved+1 WHERE id=1 AND reserved<$limit",
+                ("$limit", totalLimit ?? long.MaxValue)) != 1)
+            throw new ApiException(503, "email_budget_exhausted", "注册邮件已暂停发送，请联系网站维护者。");
         Execute(db, tx, "INSERT INTO registration_email_requests(email_key,ip_key,sent_at) VALUES($email,$ip,$now)",
             ("$email", emailKey), ("$ip", ipKey), ("$now", now));
         bool needsEmail = Count("SELECT COUNT(*) FROM account_emails WHERE email=$email", ("$email", email)) == 0;

@@ -4,6 +4,7 @@ using System.Net.Sockets;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.Data.Sqlite;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Mugonzei.Server;
 
@@ -142,6 +143,7 @@ internal static partial class Program
         await ThrowsApiAsync(503, Send);
 
         await RegistrationQuotas();
+        await RegistrationEmailBudget();
         await RefusePlainSmtp();
     }
 
@@ -169,6 +171,76 @@ internal static partial class Program
         c.Advance(TimeSpan.FromDays(1));
         await nextProcess.RequestAsync("repeat@example.test", ip, default);
         Equal(23, b.Sends, "Rolling quota expires without an operator reset");
+    }
+
+    private static async Task RegistrationEmailBudget()
+    {
+        using var f = new Fixture();
+        var clock = new RegistrationClock();
+        var mailbox = new TestMailbox();
+        var config = new ConfigurationManager
+        {
+            ["MUGONZEI_SMTP_HOST"] = "SMTPDM-ap-southeast-1.aliyuncs.com.",
+            ["MUGONZEI_SMTP_PORT"] = "80",
+            ["MUGONZEI_SMTP_FROM"] = "noreply@example.test",
+            ["MUGONZEI_SMTP_USERNAME"] = "fixture",
+            ["MUGONZEI_SMTP_PASSWORD"] = "fixture",
+            ["MUGONZEI_EMAIL_CODE_KEY"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)),
+            ["MUGONZEI_EMAIL_DAILY_LIMIT"] = "500"
+        };
+        foreach (string? invalid in new string?[] { null, "", "-1", "abc", "1.5", "2001", "9223372036854775808" })
+        {
+            config["MUGONZEI_EMAIL_TOTAL_LIMIT"] = invalid;
+            var disabled = new RegistrationEmailService(f.Store, RegistrationEmailOptions.Load(config), mailbox, clock);
+            await ThrowsApiAsync(503, () => disabled.RequestAsync("check@example.test", IPAddress.Loopback, default));
+        }
+        config["MUGONZEI_EMAIL_TOTAL_LIMIT"] = "0";
+        var paused = new RegistrationEmailService(f.Store, RegistrationEmailOptions.Load(config), mailbox, clock);
+        await ThrowsApiAsync(503, () => paused.RequestAsync("check@example.test", IPAddress.Loopback, default));
+        Equal(0, mailbox.Sends, "DirectMail requires an explicit positive allowance before contacting SMTP");
+
+        config["MUGONZEI_SMTP_HOST"] = "smtp.example.test";
+        config["MUGONZEI_EMAIL_TOTAL_LIMIT"] = "3000";
+        Check(RegistrationEmailOptions.Load(config).Ready, "Other SMTP providers can choose a larger lifetime limit");
+        config["MUGONZEI_EMAIL_TOTAL_LIMIT"] = null;
+        Check(RegistrationEmailOptions.Load(config).Ready, "An existing generic SMTP configuration remains usable without a lifetime limit");
+        config["MUGONZEI_SMTP_HOST"] = "smtpdm.aliyun.com";
+        config["MUGONZEI_EMAIL_TOTAL_LIMIT"] = "4";
+        var settings = RegistrationEmailOptions.Load(config);
+        var service = new RegistrationEmailService(f.Store, settings, mailbox, clock);
+        const string address = "member@example.test";
+        await service.RequestAsync(address, IPAddress.Loopback, default);
+        new AuthService(f.Store).Register(new("budget_member", "test-password-1234", address, mailbox.LastCode), service);
+        clock.Advance(TimeSpan.FromMinutes(1));
+        await service.RequestAsync(address, IPAddress.Loopback, default);
+        Equal("", mailbox.LastCode, "The second reservation sends the already-registered notification");
+        mailbox.Fail = true;
+        await ThrowsApiAsync(503, () => service.RequestAsync("failure@example.test", IPAddress.Loopback, default));
+
+        clock.Advance(TimeSpan.FromDays(2));
+        var resumed = new Store(f.Path);
+        var contenders = Enumerable.Range(0, 8).Select(i => Task.Run(async () =>
+        {
+            var separateMailbox = new TestMailbox();
+            var competingService = new RegistrationEmailService(resumed, settings, separateMailbox, clock);
+            try { await competingService.RequestAsync($"parallel{i}@example.test", IPAddress.Loopback, default); }
+            catch (ApiException ex) when (ex.Code == "email_budget_exhausted") { }
+            return separateMailbox.Sends;
+        })).ToArray();
+        Equal(1, (await Task.WhenAll(contenders)).Sum(), "One concurrent request can take the last lifetime reservation after restart and expiry");
+        await ThrowsApiAsync(503, () => service.RequestAsync("blocked@example.test", IPAddress.Loopback, default));
+        Equal(3, mailbox.Sends, "Delivery failures and reminders consume reservations, and an exhausted budget never calls SMTP");
+
+        using var daily = new Fixture();
+        config["MUGONZEI_EMAIL_TOTAL_LIMIT"] = "1000";
+        var mail = new TestMailbox();
+        var directMail = new RegistrationEmailService(daily.Store, RegistrationEmailOptions.Load(config), mail, clock);
+        for (int i = 0; i < 200; i++)
+            await directMail.RequestAsync($"daily{i}@example.test", IPAddress.Parse($"192.0.2.{1 + i / 20}"), default);
+        await ThrowsApiAsync(429, () => directMail.RequestAsync("dailycap@example.test", IPAddress.Loopback, default));
+        clock.Advance(TimeSpan.FromDays(1));
+        await directMail.RequestAsync("nextday@example.test", IPAddress.Loopback, default);
+        Equal(201, mail.Sends, "DirectMail clamps an oversized daily setting at 200 and reopens after a rolling day");
     }
 
     // Exercise the actual SMTP library with a server which advertises AUTH but no STARTTLS.

@@ -19,22 +19,39 @@ public sealed class RegistrationEmailOptions
     public string From { get; init; } = "";
     public byte[] CodeKey { get; init; } = [];
     public int DailyLimit { get; init; } = 200;
+    public long? TotalLimit { get; init; }
+    private bool UsesDirectMail
+    {
+        get
+        {
+            string host = Host.TrimEnd('.');
+            return host.StartsWith("smtpdm", StringComparison.OrdinalIgnoreCase)
+                && (host.EndsWith(".aliyuncs.com", StringComparison.OrdinalIgnoreCase)
+                    || host.EndsWith(".aliyun.com", StringComparison.OrdinalIgnoreCase));
+        }
+    }
+    internal int EffectiveDailyLimit => UsesDirectMail ? Math.Min(DailyLimit, 200) : DailyLimit;
     public bool Ready => Host.Length > 0 && Port is >= 1 and <= 65535 and not 465 && Username.Length > 0
         && Password.Length > 0 && MailAddress.TryCreate(From, out var sender) && sender.Address == From && CodeKey.Length == 32
-        && DailyLimit is >= 1 and <= 100_000;
+        && DailyLimit is >= 1 and <= 100_000
+        && (UsesDirectMail ? TotalLimit is >= 0 and <= 2000 : TotalLimit is null or >= 0);
 
     public static RegistrationEmailOptions Load(IConfiguration config)
     {
         byte[] key;
         try { key = Convert.FromBase64String(config["MUGONZEI_EMAIL_CODE_KEY"] ?? ""); }
         catch (FormatException) { key = []; }
+        long? totalLimit = null;
+        if (config["MUGONZEI_EMAIL_TOTAL_LIMIT"] is string total)
+            totalLimit = long.TryParse(total, NumberStyles.None, CultureInfo.InvariantCulture, out long count) ? count : -1;
         return new()
         {
             Host = (config["MUGONZEI_SMTP_HOST"] ?? "").Trim(),
             Port = int.TryParse(config["MUGONZEI_SMTP_PORT"] ?? "587", out var port) ? port : 0,
             Username = config["MUGONZEI_SMTP_USERNAME"] ?? "", Password = config["MUGONZEI_SMTP_PASSWORD"] ?? "",
             From = (config["MUGONZEI_SMTP_FROM"] ?? "").Trim(), CodeKey = key,
-            DailyLimit = int.TryParse(config["MUGONZEI_EMAIL_DAILY_LIMIT"] ?? "200", out int limit) ? limit : 0
+            DailyLimit = int.TryParse(config["MUGONZEI_EMAIL_DAILY_LIMIT"] ?? "200", out int limit) ? limit : 0,
+            TotalLimit = totalLimit
         };
     }
 }
@@ -87,7 +104,8 @@ public sealed class RegistrationEmailService(Store store, RegistrationEmailOptio
         string emailKey = AddressKey(email);
         string delivery = Guid.NewGuid().ToString("N");
         string ipKey = Convert.ToHexString(Digest("source", SourceGroup(source)));
-        bool issueCode = store.ReserveEmailDelivery(email, emailKey, ipKey, delivery, CodeHash(email, code), clock.GetUtcNow(), options.DailyLimit);
+        bool issueCode = store.ReserveEmailDelivery(email, emailKey, ipKey, delivery, CodeHash(email, code),
+            clock.GetUtcNow(), options.EffectiveDailyLimit, options.TotalLimit);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellation);
         deadline.CancelAfter(TimeSpan.FromSeconds(15));
         try

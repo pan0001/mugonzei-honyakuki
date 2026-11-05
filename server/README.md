@@ -47,6 +47,8 @@ location / {
 
 配置见 [configuration.example.txt](configuration.example.txt)。环境变量示例中的值均为占位符。`Microsoft.Data.Sqlite` 固定 `10.0.0`；原生 SQLite 包固定 `SQLitePCLRaw.lib.e_sqlite3 3.53.3`，覆盖上游旧依赖中的 CVE-2025-6965，不屏蔽审计告警。
 
+注册邮件模板默认暂停投递。采用阿里云 DirectMail 时，核实主账号剩余的免费额度后再设置 `MUGONZEI_EMAIL_TOTAL_LIMIT`。服务同时执行持久累计限额和滚动 24 小时限额。额度设置和数据库恢复步骤见[部署手册](deploy/README.md#只用阿里云免费发信额度)。
+
 ## 本机模拟
 
 ```sh
