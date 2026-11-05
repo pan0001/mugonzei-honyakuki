@@ -32,16 +32,10 @@ public sealed class ServerOptions
             CreatorId = Value("AFDIAN_USER_ID"),
             AfdianToken = Value("AFDIAN_TOKEN"),
             PaymentBaseUrl = Value("AFDIAN_PAYMENT_BASE_URL"),
-            Plans = JsonSerializer.Deserialize<List<Plan>>(Value("MUGONZEI_PLANS_JSON", "[]"),
-                new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? []
+            Plans = ReadPlans(Value("MUGONZEI_PLANS_JSON", "[]"))
         };
         if (options.MockPayments && (!environment.IsDevelopment() || options.LivePayments))
             throw new InvalidOperationException("模拟支付仅允许在 Development 且真实支付关闭时启用。");
-        if (options.Plans.Count > 30 || options.Plans.Select(p => p.Id).Distinct(StringComparer.Ordinal).Count() != options.Plans.Count
-            || options.Plans.Any(p => string.IsNullOrWhiteSpace(p.Id) || p.Id.Length > 64 || p.Id.Any(char.IsControl)
-                || string.IsNullOrWhiteSpace(p.Name) || p.Name.Length > 100 || p.Credits is < 1 or > 1_000_000
-                || p.AmountFen is < 1 or > 10_000_000 || p.AfdianPlanId is null || p.AfdianPlanId.Length > 128))
-            throw new InvalidOperationException("充值计划配置无效。");
         if (options.LivePayments)
         {
             if (string.IsNullOrWhiteSpace(options.CreatorId) || string.IsNullOrWhiteSpace(options.AfdianToken)
@@ -50,6 +44,17 @@ public sealed class ServerOptions
             ValidatePaymentUrl(options.PaymentBaseUrl);
         }
         return options;
+    }
+
+    internal static IReadOnlyList<Plan> ReadPlans(string json)
+    {
+        var plans = JsonSerializer.Deserialize<List<Plan>>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web)) ?? [];
+        if (plans.Count > 30 || plans.Any(p => p is null || string.IsNullOrWhiteSpace(p.Id) || p.Id.Length > 64 || p.Id.Any(char.IsControl)
+                || string.IsNullOrWhiteSpace(p.Name) || p.Name.Length > 100 || p.Credits is < 1 or > 1_000_000
+                || p.AmountFen is < 1 or > 10_000_000 || p.AfdianPlanId is null || p.AfdianPlanId.Length > 128)
+            || plans.Select(p => p.Id).Distinct(StringComparer.Ordinal).Count() != plans.Count)
+            throw new InvalidOperationException("充值计划配置无效。");
+        return plans;
     }
 
     public static Uri ValidatePaymentUrl(string value)
@@ -71,6 +76,6 @@ public sealed class ServerOptions
         string E(string value) => Uri.EscapeDataString(value);
         return uri.AbsoluteUri + "?user_id=" + E(CreatorId) + "&plan_id=" + E(order.AfdianPlanId)
             + "&custom_order_id=" + E(order.CustomId)
-            + "&custom_price=" + (order.AmountFen / 100m).ToString("0.00", CultureInfo.InvariantCulture);
+            + (order.DiscountFen > 0 ? "" : "&custom_price=" + (order.AmountFen / 100m).ToString("0.00", CultureInfo.InvariantCulture));
     }
 }

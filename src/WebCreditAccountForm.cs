@@ -1,4 +1,7 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 
 namespace SteamVrTranslator;
@@ -38,15 +41,22 @@ internal sealed class WebCreditAccount(CreditServiceClient client, Action<object
     private readonly CancellationTokenSource lifetime = new();
     private readonly Dictionary<string, CreditPlan> plans = new(StringComparer.Ordinal);
     private readonly Dictionary<string, CreditOrder> orders = new(StringComparer.Ordinal);
-    private readonly Dictionary<string, Guid> orderRequests = new(StringComparer.Ordinal);
-    private readonly string? token = client.Session?.Token;
+    private readonly Dictionary<(string Plan, string? Coupon, long? Price), Guid> orderRequests = new();
+    private sealed record ConfirmedQuote(string Id, string Coupon, CreditCheckoutQuote Price);
+    private ConfirmedQuote? offered;
+    private readonly CreditSession? session = client.Session;
+    // An account window can reopen during the same login. Keep only suspect order IDs,
+    // scoped to a fingerprint of the endpoint and token; nothing is persisted.
+    private static readonly ConcurrentDictionary<(string Scope, string Id), DateTimeOffset> heldPayments = new();
+    private string? paymentScope;
+    private string PaymentScope => paymentScope ??= Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(client.ServerUrl + "\n" + session?.Token)));
     private bool busy, disposed;
 
     private bool Current
     {
         get
         {
-            try { return !disposed && token != null && client.Session is { IsExpired: false } session && session.Token == token; }
+            try { return !disposed && session != null && client.Session is { IsExpired: false } stored && stored.Token == session.Token; }
             catch (Exception e) when (e is InvalidOperationException or IOException or UnauthorizedAccessException) { return false; }
         }
     }
@@ -58,7 +68,7 @@ internal sealed class WebCreditAccount(CreditServiceClient client, Action<object
         if (disposed || busy || message.ValueKind != JsonValueKind.Object
             || !message.TryGetProperty("type", out var type) || type.ValueKind != JsonValueKind.String) return;
         string? action = type.GetString();
-        if (action is not ("ready" or "refresh" or "redeem" or "buy" or "pay" or "verify" or "recover" or "cancel" or "logout")) return;
+        if (action is not ("ready" or "refresh" or "redeem" or "buy" or "quote" or "confirmCoupon" or "pay" or "verify" or "recover" or "cancel" or "logout")) return;
         busy = true;
         string? signOutNotice = null;
         try
@@ -83,7 +93,26 @@ internal sealed class WebCreditAccount(CreditServiceClient client, Action<object
                     catch (Exception) when (Current) { confirmation += " 稍后刷新以查看流水。"; }
                     if (Current) Notice(confirmation);
                     break;
-                case "buy": await Purchase(Field(message, "id", 128)); break;
+                case "buy":
+                    if (message.TryGetProperty("couponCode", out _)) throw new InvalidOperationException("请先查看并确认优惠价。");
+                    offered = null;
+                    await Purchase(Field(message, "id", 128));
+                    break;
+                case "quote":
+                    offered = null;
+                    var planId = Field(message, "id", 128);
+                    if (!plans.TryGetValue(planId, out var plan)) throw new InvalidOperationException("请刷新后选择一个积分包。");
+                    var coupon = Field(message, "couponCode", 80).Trim();
+                    var quote = await client.QuoteAsync(planId, coupon, lifetime.Token);
+                    if (!Current) break;
+                    offered = new(Guid.NewGuid().ToString("N"), coupon, quote);
+                    Send(new { type = "quote", id = offered.Id, plan.Name, quote.OriginalAmountFen, quote.DiscountFen, quote.AmountFen, quote.Credits });
+                    break;
+                case "confirmCoupon":
+                    if (offered is not { } offer || Field(message, "id", 128) != offer.Id || Field(message, "couponCode", 80).Trim() != offer.Coupon)
+                        throw new InvalidOperationException("请先查看并确认当前优惠价。");
+                    await Purchase(offer.Price.PlanId, offer);
+                    break;
                 case "pay": OpenPayment(FindOrder(message)); break;
                 case "verify":
                     var order = FindOrder(message);
@@ -106,17 +135,36 @@ internal sealed class WebCreditAccount(CreditServiceClient client, Action<object
         catch (Exception error)
         {
             if (disposed) return;
-            if (error is CreditServiceException { StatusCode: System.Net.HttpStatusCode.Unauthorized } && token != null)
-                client.ClearLocalSession(token);
+            if (error is CreditServiceException { StatusCode: System.Net.HttpStatusCode.Unauthorized } && session != null)
+                client.ClearLocalSession(session.Token);
+            if (error is CreditOrderReviewException suspect && session != null)
+            {
+                foreach (var (key, expiresAt) in heldPayments)
+                    if (expiresAt <= DateTimeOffset.UtcNow) heldPayments.TryRemove(key, out _);
+                heldPayments[(PaymentScope, suspect.OrderId)] = session.ExpiresAt;
+                if (Current) SendOrders();
+            }
             if (action == "logout") signOutNotice = "已清除本机登录。服务器未确认退出请求。";
-            else Notice(error is InvalidOperationException ? error.Message : "操作未完成，请稍后重试。");
+            else
+            {
+                if (action == "confirmCoupon" && error is not CreditServiceException { IsTransient: true }) ClearQuote();
+                Notice(error is InvalidOperationException ? error.Message : "操作未完成，请稍后重试。");
+            }
         }
         finally
         {
             busy = false;
             if (!disposed)
             {
-                if (!Current) Send(new { type = "signedOut", message = signOutNotice ?? "登录已过期或账户已更改。" });
+                if (!Current)
+                {
+                    if (signOutNotice != null && !heldPayments.IsEmpty)
+                        foreach (var key in heldPayments.Keys)
+                            if (key.Scope == PaymentScope) heldPayments.TryRemove(key, out _);
+                    offered = null;
+                    orderRequests.Clear();
+                    Send(new { type = "signedOut", message = signOutNotice ?? "登录已过期或账户已更改。" });
+                }
                 Send(new { type = "busy", value = false });
             }
         }
@@ -140,6 +188,7 @@ internal sealed class WebCreditAccount(CreditServiceClient client, Action<object
     {
         var rows = await client.GetPlansAsync(lifetime.Token);
         if (!Current) return;
+        offered = null;
         plans.Clear();
         foreach (var row in rows.Take(100)) plans[row.Id] = row;
         Send(new { type = "plans", rows = plans.Values.Select(p => new { p.Id, p.Name, p.Credits, p.AmountFen }) });
@@ -160,19 +209,31 @@ internal sealed class WebCreditAccount(CreditServiceClient client, Action<object
         SendOrders();
     }
 
+    private bool PaymentHeld(string id) => !heldPayments.IsEmpty && heldPayments.ContainsKey((PaymentScope, id));
+
     private void SendOrders() => Send(new { type = "orders", rows = orders.Values.OrderByDescending(r => r.CreatedAt)
-        .Select(r => new { r.Id, r.Status, r.CreatedAt, r.Credits, r.AmountFen, payable = r.Status == "pending" && r.PayUrl?.Length > 0 }) });
+        .Select(r => new { r.Id, r.Status, r.CreatedAt, r.Credits, r.AmountFen, paymentHeld = PaymentHeld(r.Id),
+            payable = r.Status == "pending" && r.PayUrl?.Length > 0 && !PaymentHeld(r.Id) }) });
 
     private CreditOrder FindOrder(JsonElement message) => orders.TryGetValue(Field(message, "id", 128), out var order)
         ? order : throw new InvalidOperationException("请刷新后选择一个订单。");
 
-    private async Task Purchase(string plan)
+    private void ClearQuote(bool purchased = false)
+    {
+        offered = null;
+        Send(new { type = "clearQuote", purchased });
+    }
+
+    private async Task Purchase(string plan, ConfirmedQuote? offer = null)
     {
         if (!plans.ContainsKey(plan)) throw new InvalidOperationException("请刷新后选择一个积分包。");
-        if (!orderRequests.TryGetValue(plan, out var id)) orderRequests[plan] = id = Guid.NewGuid();
-        var order = await client.CreateOrderAsync(plan, id, lifetime.Token);
+        var key = (plan, offer?.Coupon, offer?.Price.AmountFen);
+        if (!orderRequests.TryGetValue(key, out var id)) orderRequests[key] = id = Guid.NewGuid();
+        var order = offer == null ? await client.CreateOrderAsync(plan, id, lifetime.Token)
+            : await client.CreateCouponOrderAsync(offer.Price, offer.Coupon, id, lifetime.Token);
         if (!Current) return;
-        orderRequests.Remove(plan);
+        orderRequests.Remove(key);
+        if (offer != null) ClearQuote(purchased: true);
         orders[order.Id] = order;
         SendOrders();
         if (order.Status == "pending") OpenPayment(order);
@@ -181,6 +242,7 @@ internal sealed class WebCreditAccount(CreditServiceClient client, Action<object
 
     private void OpenPayment(CreditOrder order)
     {
+        if (PaymentHeld(order.Id)) throw new InvalidOperationException("该订单已阻止付款，请联系运营者核对。");
         if (order.Status != "pending" || string.IsNullOrWhiteSpace(order.PayUrl))
             throw new InvalidOperationException("这个订单当前无法付款。");
         open(CreditServiceClient.ValidatePaymentUrl(order.PayUrl, client.ServerUrl));
@@ -200,6 +262,8 @@ internal sealed class WebCreditAccount(CreditServiceClient client, Action<object
     {
         if (disposed) return;
         disposed = true;
+        offered = null;
+        orderRequests.Clear();
         _ = ReleaseAsync();
     }
 

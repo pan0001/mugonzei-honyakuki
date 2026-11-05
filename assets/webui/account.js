@@ -14,7 +14,7 @@
     refund_pending:'退款处理中', running:'处理中', queued:'排队中', succeeded:'已完成', failed:'未完成', no_text:'没有读到文字' };
   const kinds = { redemption:'兑换码入账', recharge:'充值到账', purchase:'充值', translation:'翻译', refund:'退款', refund_hold:'预留退款积分', refund_release:'释放退款预留', sponsor:'赞助到账' };
   const lookup = (map, key) => Object.hasOwn(map, key) ? map[key] : key;
-  let busy = false, signedIn = false;
+  let busy = false, signedIn = false, planRows = [], quoteId = null;
   function lock(value) {
     busy = value;
     for (const b of document.querySelectorAll('button:not([data-page]),input')) b.disabled = busy || !signedIn;
@@ -34,16 +34,33 @@
     const e = node('article', null, 'entry'), body = node('div'), actions = node('div', null, 'actions');
     body.append(node('p', row.credits + ' 积分 · ' + price(row.amountFen) + ' · ' + lookup(states, row.status)),
       node('time', moment(row.createdAt)), node('span', row.id, 'ref'));
+    if (row.paymentHeld) body.append(node('p', '已阻止付款，请联系运营者核对。', 'muted'));
     if (row.payable) actions.append(button('去付款', () => send('pay', {id:row.id})));
     if (row.status === 'pending') actions.append(button('核验到账', () => send('verify', {id:row.id})));
     e.append(body, actions); return e;
   }
   function plan(row) {
     const e = node('article', null, 'plan');
+    const coupon = $('coupon-code').value.trim();
     e.append(node('strong', row.credits + ' 积分'), node('div', row.name, 'muted'),
-      button(price(row.amountFen) + ' 充值', () => send('buy', {id:row.id}), 'buy'));
+      button(price(row.amountFen) + (coupon ? ' · 查看优惠价' : ' 充值'), () => {
+        clearQuote();
+        if ($('coupon-code').value.trim() !== coupon) { showPlans(); return; }
+        if (coupon) send('quote', {id:row.id, couponCode:coupon});
+        else send('buy', {id:row.id});
+      }, 'buy'));
     return e;
   }
+  function showPlans() { renderRows('plans', planRows, '当前没有可购买的积分包。', plan); }
+  function clearQuote() {
+    quoteId = null;
+    $('coupon-quote').hidden = true;
+    for (const id of ['quote-plan','quote-details','quote-total']) $(id).textContent = '';
+  }
+  $('coupon-code').addEventListener('input', () => { clearQuote(); showPlans(); });
+  $('confirm-coupon').addEventListener('click', () => {
+    if (quoteId) send('confirmCoupon', {id:quoteId, couponCode:$('coupon-code').value.trim()});
+  });
   function entry(row) {
     const e = node('article', null, 'entry'), body = node('div');
     body.append(node('p', lookup(kinds, row.kind)), node('time', moment(row.createdAt)), node('span', row.reference, 'ref'));
@@ -63,7 +80,17 @@
       case 'identity': signedIn = true; $('identity').textContent = data.username + ' · ' + data.host; $('content').hidden = false; break;
       case 'busy': lock(data.value); break;
       case 'balance': $('available').textContent = String(Math.max(0, data.balance - data.reserved)); $('details').textContent = '总余额 ' + data.balance + ' · 预留 ' + data.reserved; break;
-      case 'plans': renderRows('plans', data.rows, '当前没有可购买的积分包。', plan); break;
+      case 'plans': clearQuote(); planRows = data.rows; showPlans(); break;
+      case 'quote':
+        quoteId = data.id;
+        $('quote-plan').textContent = data.name + ' · ' + data.credits + ' 积分';
+        $('quote-details').textContent = '原价 ' + price(data.originalAmountFen) + ' · 优惠 ' + price(data.discountFen);
+        $('quote-total').textContent = '应付 ' + price(data.amountFen);
+        $('coupon-quote').hidden = false; break;
+      case 'clearQuote':
+        clearQuote();
+        if (data.purchased) { $('coupon-code').value = ''; showPlans(); }
+        break;
       case 'orders': renderRows('orders', data.rows, '暂无充值订单。', order); break;
       case 'ledger': renderRows('ledger', data.rows, '暂无积分流水。', entry); break;
       case 'recent': $('task-status').textContent = data.isExpired ? '译文已过期' : (data.error || lookup(states,data.status)); $('source').textContent = data.sourceText || '—'; $('translation').textContent = data.translation || '—'; $('task-text').hidden = false; break;
@@ -71,7 +98,7 @@
       case 'signedOut':
         signedIn = false; $('content').hidden = true; $('identity').textContent = data.message; $('notice').textContent = '关闭账户窗口后，可重新登录。';
         for (const id of ['available','details','plans','orders','ledger','source','translation','task-status']) $(id).replaceChildren();
-        $('code').value = ''; lock(false); break;
+        $('code').value = ''; $('coupon-code').value = ''; planRows = []; clearQuote(); lock(false); break;
     }
   });
   lock(true); bridge.postMessage({type:'ready'});

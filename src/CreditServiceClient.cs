@@ -176,6 +176,56 @@ public sealed class CreditServiceClient : IDisposable
         return SendAsync<CreditOrder>(HttpMethod.Post, "v1/orders", new { planId, requestId }, RequireSession(), token);
     }
 
+    public async Task<CreditCheckoutQuote> QuoteAsync(string planId, string couponCode, CancellationToken token = default)
+    {
+        if (string.IsNullOrWhiteSpace(planId) || planId.Length > 128 || planId.Any(char.IsControl))
+            throw new InvalidOperationException("请选择有效积分包。");
+        couponCode = CheckoutCoupon(couponCode);
+        var quote = await CouponRequest<CreditCheckoutQuote>("v1/checkout/quote", new { planId, couponCode }, token).ConfigureAwait(false);
+        if (quote.PlanId != planId || quote.Credits <= 0 || quote.AmountFen < 1 || quote.OriginalAmountFen <= quote.AmountFen
+            || quote.DiscountFen != quote.OriginalAmountFen - quote.AmountFen)
+            throw new InvalidOperationException("服务返回的优惠报价无效。请重新查看优惠价。");
+        return quote;
+    }
+
+    public async Task<CreditOrder> CreateCouponOrderAsync(CreditCheckoutQuote quote, string couponCode, Guid requestId, CancellationToken token = default)
+    {
+        if (requestId == Guid.Empty) throw new InvalidOperationException("订单编号无效。");
+        couponCode = CheckoutCoupon(couponCode);
+        var order = await CouponRequest<CreditOrder>("v1/checkout/orders", new { planId = quote.PlanId, requestId, couponCode, expectedAmountFen = quote.AmountFen }, token).ConfigureAwait(false);
+        if (string.IsNullOrWhiteSpace(order.Id) || order.Id.Length > 128 || order.Id.Any(char.IsControl)) throw InvalidResponse();
+        if (order.PlanId != quote.PlanId || string.IsNullOrWhiteSpace(order.Status)
+            || order.Credits != quote.Credits || order.AmountFen != quote.AmountFen || order.OriginalAmountFen != quote.OriginalAmountFen
+            || order.DiscountFen != quote.DiscountFen)
+            throw new CreditOrderReviewException(order.Id, "订单与确认的优惠报价不一致。已阻止该订单付款，请联系运营者核对。");
+        if (order.Status == "pending")
+        {
+            try { ValidatePaymentUrl(order.PayUrl ?? "", ServerUrl); }
+            catch (InvalidOperationException) { throw new CreditOrderReviewException(order.Id, "订单付款链接无效。已阻止该订单付款，请联系运营者核对。"); }
+        }
+        return order;
+    }
+
+    private static string CheckoutCoupon(string couponCode)
+    {
+        if (string.IsNullOrWhiteSpace(couponCode) || couponCode.Length > 80 || couponCode.Any(char.IsControl))
+            throw new InvalidOperationException("请输入有效的充值优惠码（最多 80 个字符）。");
+        return couponCode.Trim();
+    }
+
+    private async Task<T> CouponRequest<T>(string path, object body, CancellationToken token)
+    {
+        try { return await SendAsync<T>(HttpMethod.Post, path, body, RequireSession(), token).ConfigureAwait(false); }
+        catch (CreditServiceException e) when (e.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)
+        { throw new CreditServiceException("此积分服务暂不支持优惠码。若要按原价购买，请先清空优惠码。", e.StatusCode); }
+        catch (CreditServiceException e) when (e.StatusCode == HttpStatusCode.BadRequest)
+        { throw new CreditServiceException("这个优惠码当前无法用于所选积分包。请检查或更换优惠码。", e.StatusCode); }
+        catch (CreditServiceException e) when (e.StatusCode == HttpStatusCode.Conflict)
+        { throw new CreditServiceException("优惠价或订单状态已变化，请刷新订单并重新查看优惠价。", e.StatusCode); }
+        catch (CreditServiceException e) when (e.IsTransient)
+        { throw new CreditServiceException("暂时无法确认结果。请稍后重试，或刷新订单查看是否已建单。", e.StatusCode, isTransient: true); }
+    }
+
     public Task<CreditOrder> GetOrderAsync(string orderId, bool refresh = false, CancellationToken token = default)
     {
         if (string.IsNullOrWhiteSpace(orderId) || orderId.Length > 128 || orderId.Any(char.IsControl))
@@ -367,6 +417,11 @@ public sealed class CreditServiceException : InvalidOperationException
     { StatusCode = statusCode; IsTransient = isTransient; }
 }
 
+internal sealed class CreditOrderReviewException(string orderId, string message) : InvalidOperationException(message)
+{
+    internal string OrderId { get; } = orderId;
+}
+
 public sealed class CreditTranslationResult
 {
     public Guid Id { get; set; }
@@ -411,9 +466,20 @@ public sealed class CreditPlan
 public sealed class CreditOrder
 {
     public string Id { get; set; } = "";
+    public string? PlanId { get; set; }
     public string Status { get; set; } = "";
     public string? PayUrl { get; set; }
     public long Credits { get; set; }
     public long AmountFen { get; set; }
+    public long? OriginalAmountFen { get; set; }
+    public long? DiscountFen { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
+}
+public sealed class CreditCheckoutQuote
+{
+    public string PlanId { get; init; } = "";
+    public int Credits { get; init; }
+    public int AmountFen { get; init; }
+    public int OriginalAmountFen { get; init; }
+    public int DiscountFen { get; init; }
 }

@@ -18,6 +18,7 @@ public static class CreditServiceTests
         await AuthenticationAndAccountContract();
         await EmailDeliveryFailures();
         await RedemptionContract();
+        await CouponContract();
         await RecoverWithoutResubmission();
         await MissingAfterDisconnectReusesId();
         await CancellationUsesIndependentToken();
@@ -157,6 +158,53 @@ public static class CreditServiceTests
             Assert(!failure.Message.Contains(Secret), "mail delivery failure never discloses raw diagnostics");
         }
         Assert(File.ReadAllBytes(stored).AsSpan().SequenceEqual(original), "requesting codes leaves a preexisting session intact");
+    }
+
+    private static async Task CouponContract()
+    {
+        using var temp = Authenticated();
+        const string plan = "small", coupon = "Mc-sample";
+        var requestId = Guid.NewGuid();
+        var paths = new List<string>();
+        HttpStatusCode status = HttpStatusCode.OK;
+        long amount = 350, discount = 150;
+        using var client = Client(temp, async (request, token) =>
+        {
+            string path = request.RequestUri!.AbsolutePath;
+            paths.Add(path);
+            Equal(HttpMethod.Post, request.Method, "coupon uses POST");
+            Equal("", request.RequestUri.Query, "coupon never appears in URL");
+            Equal(Secret, request.Headers.Authorization?.Parameter, "coupon uses endpoint-bound session");
+            using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
+            Equal(plan, body.RootElement.GetProperty("planId").GetString(), "requested plan");
+            Equal(coupon, body.RootElement.GetProperty("couponCode").GetString(), "coupon only trimmed");
+            if (path == "/base/v1/checkout/quote")
+            {
+                Equal(2, body.RootElement.EnumerateObject().Count(), "only plan and coupon in quote");
+                return Response(new { planId = plan, originalAmountFen = 500, discountFen = discount, amountFen = amount, credits = 200 }, status);
+            }
+            Equal("/base/v1/checkout/orders", path, "coupon orders never fall back to standard checkout");
+            Equal(350L, body.RootElement.GetProperty("expectedAmountFen").GetInt64(), "confirmed price sent");
+            Equal(requestId, body.RootElement.GetProperty("requestId").GetGuid(), "order idempotency key preserved");
+            return Response(new { id = "sample", planId = plan, status = "pending", payUrl = "https://afdian.com/order/create?plan=fixture",
+                originalAmountFen = 500, discountFen = discount, amountFen = amount, credits = 200 }, status);
+        });
+        var quote = await client.QuoteAsync(plan, " " + coupon + " ");
+        Equal(350L, (await client.CreateCouponOrderAsync(quote, coupon, requestId)).AmountFen, "valid discounted order");
+        amount = 400; discount = 100;
+        await ExpectAsync<InvalidOperationException>(() => client.CreateCouponOrderAsync(quote, coupon, requestId), "不一致");
+        discount = 234;
+        await ExpectAsync<InvalidOperationException>(() => client.QuoteAsync(plan, coupon), "报价无效");
+        foreach (var (code, message) in new[] { (HttpStatusCode.NotFound, "不支持"), (HttpStatusCode.BadRequest, "无法用于"),
+            (HttpStatusCode.Conflict, "已变化") })
+        {
+            status = code;
+            await ExpectAsync<CreditServiceException>(() => client.CreateCouponOrderAsync(quote, coupon, requestId), message);
+        }
+        int before = paths.Count;
+        await ExpectAsync<InvalidOperationException>(() => client.QuoteAsync(plan, new string('a', 81)), "80");
+        Equal(before, paths.Count, "oversize input rejected before contacting the server");
+        Assert(!paths.Contains("/base/v1/orders"), "failed coupon requests never create full-price orders");
     }
 
     private static async Task RedemptionContract()

@@ -23,6 +23,8 @@ internal static partial class Program
         {
             if (args.FirstOrDefault() == "--serve-e2e") return await ServeEmailFixture(args);
             await PaymentAccounting();
+            await CouponTests();
+            await CouponCheckoutHttpTests();
             await PaymentVerification();
             RefundAccounting();
             await AuthenticationPersistence();

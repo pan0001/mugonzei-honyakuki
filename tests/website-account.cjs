@@ -51,7 +51,9 @@ async function main() {
   let paid = false;
   transport = async (path, options) => {
     if (path === '/v1/orders' && options.method === 'POST') {
-      ids.push(JSON.parse(options.body).requestId);
+      const body = JSON.parse(options.body);
+      check(Object.keys(body).sort().join(',') === 'planId,requestId', 'Ordinary orders retain their original endpoint and body');
+      ids.push(body.requestId);
       if (fail) { fail = false; throw new Error('network reset after server commit'); }
       return response(order);
     }
@@ -92,9 +94,122 @@ async function main() {
   await api.api('/account').catch(() => {});
   check(api.getToken() === '', '401 revokes in-memory session');
   check(element('dashboard').hidden && !element('auth-section').hidden, '401 returns to sign-in');
+  await couponTests();
   await redemptionTests();
   await registrationTests();
   console.log('PASS ' + assertions + ' website account security and workflow assertions');
+}
+
+async function couponTests() {
+  const plan = {id:'credits-50', name:'50 积分', credits:50, amountFen:1000};
+  const quote = {planId:plan.id, credits:50, originalAmountFen:1000, discountFen:250, amountFen:750};
+  const order = {id:crypto.randomUUID().replaceAll('-', ''), planId:plan.id, status:'pending', createdAt:new Date().toISOString(),
+    credits:50, originalAmountFen:1000, discountFen:250, amountFen:750, payUrl:'https://afdian.com/order/create?custom_order_id=example'};
+  const posts = [];
+  let orders = [];
+  let quoteReply = async () => response(quote);
+  let orderReply = async () => response(order);
+  let ordinaryPosts = 0;
+  const fixture = async (url, options) => {
+    if (options.method === 'POST') {
+      const body = JSON.parse(options.body);
+      posts.push({url, body});
+      check(options.headers.Authorization === 'Bearer ' + 'k'.repeat(43), 'Coupon requests carry the current account token');
+      if (url === '/v1/checkout/quote') return quoteReply(options);
+      if (url === '/v1/checkout/orders') return orderReply();
+      ordinaryPosts++;
+      return response({}, 500);
+    }
+    if (url === '/v1/plans') return response([plan]);
+    if (url === '/v1/orders') return response(orders);
+    if (url === '/v1/ledger') return response([]);
+    if (url === '/v1/account') return response({username:'fixture', balance:0, reserved:0});
+    throw new Error('Unexpected coupon fixture path');
+  };
+  const setAccount = async () => { api.clearSession(); api.setSession('k'.repeat(43)); transport = fixture; await api.loadDashboard(); };
+  const planButton = label => walk(element('plans')).find(e => e.tagName === 'button' && e.textContent === label);
+  const open = () => planButton('使用优惠码').events.click();
+  const input = value => { element('coupon-code').value = value; element('coupon-code').events.input(); };
+  const submit = () => element('coupon-form').events.submit({preventDefault(){}});
+  const confirm = () => element('coupon-confirm').events.click();
+  const hasPayLink = () => walk(element('checkout-message')).some(e => e.tagName === 'a');
+  const createPosts = () => posts.filter(p => p.url === '/v1/checkout/orders');
+  const unsupported = '此积分服务暂不支持优惠码，如需原价请主动选择按原价购买。';
+  await setAccount(); open();
+  check(!element('coupon-panel').hidden && element('coupon-confirm').hidden, 'Opening the coupon editor makes no order or payment link');
+  for (const bad of ['', 'X'.repeat(81)]) { input(bad); await submit(); }
+  check(posts.length === 0 && element('coupon-message').dataset.tone === 'error', 'Unusable coupon input does not reach either checkout endpoint');
+
+  let release;
+  let signal;
+  quoteReply = options => { signal = options.signal; return new Promise(resolve => { release = resolve; }); };
+  input('old-code'); const stale = submit(); await submit();
+  check(posts.length === 1 && element('coupon-preview').disabled, 'An in-flight quote blocks duplicate pricing requests');
+  input(' new-Code ');
+  check(signal.aborted, 'Changing the code immediately aborts the old quote');
+  release(response(quote)); await stale;
+  check(element('coupon-quote').hidden && element('coupon-confirm').disabled, 'A late quote cannot be confirmed for a changed code');
+  for (const invalid of [null, {...quote,planId:'other'}, {...quote,discountFen:0}, {...quote,amountFen:0}, {...quote,amountFen:751}]) {
+    quoteReply = async () => response(invalid);
+    await submit(); await confirm();
+    check(element('coupon-quote').hidden && !createPosts().length && !hasPayLink(), 'Invalid pricing data cannot produce a payable order');
+  }
+  quoteReply = async () => response({message:'raw coupon here'}, 400);
+  await submit();
+  check(element('coupon-message').textContent.includes('更换') && !element('coupon-message').textContent.includes('raw'), 'Invalid codes can be replaced without reflecting raw service errors');
+  for (const status of [404,405]) {
+    quoteReply = async () => response({}, status);
+    await submit();
+    check(element('coupon-message').textContent === unsupported && element('coupon-confirm').disabled &&
+      !createPosts().length && ordinaryPosts === 0 && !hasPayLink(), 'Unsupported quote HTTP ' + status + ' explains optional manual full-price checkout without creating an order');
+  }
+  quoteReply = async () => response(quote);
+  await submit();
+  const quoteBody = posts.at(-1).body;
+  check(JSON.stringify(quoteBody) === JSON.stringify({planId:plan.id,couponCode:'new-Code'}), 'Quote sends only the chosen plan and trimmed code (server normalizes case)');
+  check(!element('coupon-quote').hidden && !element('coupon-confirm').disabled &&
+    ['quote-credits','quote-original','quote-discount','quote-total'].map(id=>element(id).textContent).join('|') === '50|¥10.00|−¥2.50|¥7.50',
+    'Approved server quote visibly contains credits, retail, savings, and payable amount');
+  check(!createPosts().length && !hasPayLink(), 'Computing the discounted price never creates an order');
+  element('coupon-cancel').events.click();
+  check(element('coupon-panel').hidden && !element('coupon-code').value && element('coupon-confirm').disabled && !!planButton('按原价创建订单'), 'Abandoning a quote leaves ordinary checkout accessible with a cleared draft');
+
+  open(); input('new-Code'); await submit();
+  orderReply = async () => { throw new Error('simulated network loss'); };
+  await confirm();
+  check(!hasPayLink() && element('checkout-message').textContent.includes('复用') && planButton('使用优惠码').disabled, 'Unconfirmed creation cannot open payment or change uncertain request terms');
+  orderReply = async () => { orders = [order]; return response(order); };
+  await planButton('重试创建订单').events.click();
+  const attempts = createPosts();
+  check(attempts.length === 2 && JSON.stringify(attempts[0]) === JSON.stringify(attempts[1]) && attempts[0].body.requestId.length === 36,
+    'Lost discounted order response retries the original request ID, endpoint and complete body');
+  check(attempts[0].body.couponCode === 'new-Code' && attempts[0].body.expectedAmountFen === 750 && attempts[0].body.planId === plan.id
+    && Object.keys(attempts[0].body).length === 4 && hasPayLink(), 'Explicit confirmation binds expected total and opens a payment link only for a matching server order');
+  api.renderOrders([{...order,status:'paid'}]);
+  const history = walk(element('orders-body')).map(e => e.textContent);
+  check(history.includes('实付 ¥7.50') && history.includes('原价 ¥10.00 · 已减 ¥2.50'), 'Paid history identifies the charged amount separately from the original price');
+  api.renderOrders([{id:order.id, status:'paid', credits:50, amountFen:1000, createdAt:order.createdAt}]);
+  check(walk(element('orders-body')).some(e=>e.textContent === '实付 ¥10.00'), 'Older non-discount order history displays its actual amount without inventing a discount');
+
+  orders = []; await setAccount(); open(); input('new-Code'); await submit();
+  orderReply = async () => response({...order,amountFen:1000,discountFen:0});
+  await confirm();
+  check(!hasPayLink() && element('coupon-confirm').disabled && element('coupon-message').textContent.includes('不符'), 'Unexpected repricing suppresses payment and forces a fresh quote');
+  api.renderOrders([order]);
+  check(!walk(element('orders-body')).some(e=>e.tagName==='a'), 'A known mismatched order also has no pay link in the current session history');
+  for (const status of [404,405]) {
+    await submit(); orderReply = async () => response({}, status); await confirm();
+    check(element('coupon-message').textContent === unsupported && !hasPayLink() && element('coupon-confirm').disabled &&
+      ordinaryPosts === 0, 'Unsupported coupon order HTTP ' + status + ' explains manual full-price checkout and never opens payment or falls back');
+  }
+
+  quoteReply = () => new Promise(resolve=>{ release=resolve; });
+  const oldSession = submit(); api.clearSession(); api.setSession('z'.repeat(43));
+  release(response(quote)); await oldSession;
+  check(element('coupon-panel').hidden && !element('coupon-code').value && element('coupon-confirm').disabled && !hasPayLink(), 'Logout clears the code and a previous session reply cannot revive checkout');
+  const markup = fs.readFileSync(path.join(__dirname,'..','website','account.html'),'utf8');
+  check(markup.includes('for="coupon-code"') && /id="coupon-message"[^>]*role="status"/.test(markup)
+    && markup.includes('action="/v1/redemptions"') && markup.includes('action="/v1/checkout/quote"'), 'Coupon pricing has an accessible, separate form from credit redemption');
 }
 
 async function registrationTests() {

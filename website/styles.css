@@ -144,6 +144,19 @@
 .balance-value { letter-spacing: -.035em; font-variant-numeric: tabular-nums; font-weight: 650; }
 .account-grid { align-items: start; grid-template-columns: minmax(0,1.25fr) minmax(0,.75fr); }
 .plan-card { background: #faf9f6; border-color: var(--line); border-radius: 8px; }
+.plan-card .button + .button { margin-top: 7px; }
+.coupon-panel { margin-top: 18px; padding: 18px; border: 1px solid #d1c9df; border-radius: 10px; background: #f7f5fb; }
+.coupon-panel h4 { margin: 0 0 14px; font-size: 16px; overflow-wrap: anywhere; }
+#coupon-form { display: flex; align-items: end; flex-wrap: wrap; gap: 8px; margin-bottom: 13px; }
+#coupon-form .form-row { flex: 1 1 145px; min-width: 0; margin: 0; }
+.coupon-quote { margin: 15px 0; }
+.coupon-quote > div { display: flex; justify-content: space-between; gap: 10px; margin-block: 4px; }
+.coupon-quote dt { color: var(--muted); font-size: 13px; }
+.coupon-quote dd { margin: 0; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.coupon-quote .quote-total { border-top: 1px solid var(--line); padding-top: 10px; }
+.quote-total dt, .quote-total dd { color: var(--ink); font-size: 16px; font-weight: 650; }
+.order-price > * { display: block; }
+.order-price small { color: var(--muted); }
 .data-table th { background: #f1efea; color: var(--ink); }
 .order-status { background: #e9e7ed; color: #514c5a; }
 .status-paid { background: #e4f0e7; color: #285d40; }

@@ -10,7 +10,13 @@
     <section id="overview" aria-label="账户">
       <div class="balance"><div><span>可用积分</span><strong id="available">—</strong></div><p id="details">尚未读取余额</p></div>
       <h2>兑换积分</h2><form id="redeem-form"><label class="sr" for="code">兑换码</label><input id="code" type="password" maxlength="128" placeholder="输入兑换码" autocomplete="off" required><button type="submit">兑换</button></form>
-      <h2>积分充值</h2><div id="plans" class="plans"><p class="empty">正在读取积分包…</p></div>
+      <h2>积分充值</h2>
+      <div class="coupon-field"><label for="coupon-code">充值优惠码（选填）</label><input id="coupon-code" type="text" maxlength="80" autocomplete="off" spellcheck="false" placeholder="填写后选择积分包查看优惠价"></div>
+      <div id="plans" class="plans"><p class="empty">正在读取积分包…</p></div>
+      <div id="coupon-quote" class="quote" hidden>
+        <div aria-live="polite"><strong id="quote-plan"></strong><p id="quote-details" class="muted"></p><p id="quote-total"></p></div>
+        <button id="confirm-coupon" type="button" class="buy">确认并去付款</button>
+      </div>
     </section>
     <section id="history" aria-label="订单与流水" hidden>
       <h2>充值订单</h2><div id="orders"><p class="empty">正在读取订单…</p></div>

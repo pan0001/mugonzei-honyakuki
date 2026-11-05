@@ -7,6 +7,8 @@
   const date = new Intl.DateTimeFormat('zh-CN', { dateStyle: 'short', timeStyle: 'short' });
   const pendingRequests = new Map();
   const createdOrders = new Map();
+  const mismatchedOrders = new Set();
+  const couponsUnsupported = '此积分服务暂不支持优惠码，如需原价请主动选择按原价购买。';
   let token = '';
   let generation = 0;
   let mode = 'login';
@@ -21,6 +23,9 @@
   let checkoutBusy = false;
   let redemptionBusy = false;
   let checkoutOrderId = '';
+  let couponPlan = null;
+  let couponRequest = null;
+  let confirmedQuote = null;
   let plans = [];
 
   class ApiError extends Error {
@@ -40,6 +45,9 @@
     token = '';
     pendingRequests.clear();
     createdOrders.clear();
+    mismatchedOrders.clear();
+    closeCoupon();
+    $('plans').replaceChildren();
     $('auth-section').hidden = false;
     $('dashboard').hidden = true;
     $('account-username').textContent = '';
@@ -106,7 +114,7 @@
       return data;
     } catch (error) {
       if (error instanceof ApiError) throw error;
-      if (error.name === 'AbortError') throw new ApiError(path === '/orders' && method === 'POST'
+      if (error.name === 'AbortError') throw new ApiError((path === '/orders' || path === '/checkout/orders') && method === 'POST'
         ? '连接超时，请重试同一方案或查看订单列表，避免重复付款。'
         : '连接超时，请稍后重试。');
       throw new ApiError('暂时连接不到服务器，请检查网络后重试。');
@@ -314,6 +322,7 @@
 
   function renderPlans() {
     const list = $('plans'); list.replaceChildren();
+    if (couponPlan && !plans.some(plan => plan.id === couponPlan.id)) closeCoupon();
     if (!plans.length) {
       list.append(node('p', '充值暂未开放。当前没有可购买的积分方案，请稍后再来。', 'empty-state'));
       return;
@@ -323,11 +332,19 @@
       const detail = node('div');
       detail.append(node('h4', plan.name), node('p', formatNumber(plan.credits) + ' 积分 · ' + formatMoney(plan.amountFen), 'muted'));
       const existing = createdOrders.get(plan.id);
-      const label = existing ? '查看待付款订单' : pendingRequests.has(plan.id) ? '重试创建订单' : '创建充值订单';
+      const pending = pendingRequests.has(plan.id);
+      const label = pending ? '重试创建订单' : existing ? '查看待付款订单' : '按原价创建订单';
       const button = node('button', label, 'button button-primary button-small');
       button.type = 'button'; button.disabled = checkoutBusy;
-      button.addEventListener('click', () => existing ? showCheckout(existing) : createOrder(plan));
-      card.append(detail, button); list.append(card);
+      button.addEventListener('click', () => {
+        closeCoupon();
+        return !pending && existing ? showCheckout(existing) : createOrder(plan);
+      });
+      const coupon = node('button', '使用优惠码', 'button button-ghost button-small');
+      coupon.type = 'button'; coupon.disabled = checkoutBusy || pending;
+      coupon.setAttribute('aria-controls', 'coupon-panel');
+      coupon.addEventListener('click', () => openCoupon(plan));
+      card.append(detail, button, coupon); list.append(card);
     }
   }
 
@@ -339,11 +356,18 @@
       const row = node('tr');
       row.append(node('td', formatDate(order.createdAt)));
       const idCell = node('td'); const id = node('code', String(order.id).slice(0, 10) + '…', 'record-id'); id.title = String(order.id); idCell.append(id); row.append(idCell);
-      row.append(node('td', formatNumber(order.credits) + ' / ' + formatMoney(order.amountFen)));
+      const price = node('td');
+      const priceLabel = ['paid','refund_pending','refunded'].includes(order.status) ? '实付 ' : order.status === 'pending' ? '应付 ' : '订单金额 ';
+      price.append(node('span', formatNumber(order.credits) + ' 积分'), node('strong', priceLabel + formatMoney(order.amountFen)));
+      if (Number.isSafeInteger(order.discountFen) && order.discountFen > 0 && Number.isSafeInteger(order.originalAmountFen))
+        price.append(node('small', '原价 ' + formatMoney(order.originalAmountFen) + ' · 已减 ' + formatMoney(order.discountFen)));
+      price.className = 'order-price';
+      row.append(price);
       const status = node('td'); status.append(node('span', statuses[order.status] || '状态待确认', 'order-status status-' + (Object.hasOwn(statuses, order.status) ? order.status : 'unknown'))); row.append(status);
       const actions = node('td'); const group = node('div', undefined, 'inline-actions');
       if (order.status === 'pending') {
-        const link = paymentLink(order.payUrl); if (link) group.append(link);
+        if (mismatchedOrders.has(order.id)) group.append(node('span', '订单与报价不符，请勿付款。', 'muted'));
+        else { const link = paymentLink(order.payUrl); if (link) group.append(link); }
         const refresh = node('button', '核验到账', 'button button-ghost button-small'); refresh.type = 'button';
         refresh.addEventListener('click', () => verifyOrder(order.id, refresh)); group.append(refresh);
       } else group.append(node('span', '—', 'muted'));
@@ -429,11 +453,108 @@
     return failures === 0;
   }
 
+  function couponMessage(text = '', tone = 'info') {
+    const status = $('coupon-message');
+    status.textContent = text;
+    status.dataset.tone = tone;
+    status.hidden = !text;
+  }
+
+  function invalidateQuote() {
+    couponRequest?.abort();
+    couponRequest = null;
+    confirmedQuote = null;
+    $('coupon-quote').hidden = true;
+    $('coupon-confirm').hidden = true;
+    $('coupon-confirm').disabled = true;
+    $('coupon-preview').disabled = false;
+    $('coupon-form').setAttribute('aria-busy', 'false');
+    couponMessage();
+  }
+
+  function closeCoupon() {
+    invalidateQuote();
+    couponPlan = null;
+    $('coupon-code').value = '';
+    $('coupon-panel').hidden = true;
+  }
+
+  function openCoupon(plan) {
+    if (!token || checkoutBusy || pendingRequests.has(plan.id)) return;
+    closeCoupon();
+    couponPlan = plan;
+    checkoutOrderId = '';
+    $('checkout-message').replaceChildren();
+    $('checkout-message').hidden = true;
+    $('coupon-title').textContent = plan.name + ' · 使用优惠码';
+    $('coupon-panel').hidden = false;
+    $('coupon-code').focus();
+  }
+
+  async function previewCoupon() {
+    const plan = couponPlan;
+    if (!token || !plan || checkoutBusy || couponRequest) return;
+    const couponCode = $('coupon-code').value.trim();
+    invalidateQuote();
+    if (!couponCode || couponCode.length > 80) {
+      couponMessage('请输入完整优惠码，最多 80 个字符。', 'error');
+      $('coupon-code').focus();
+      return;
+    }
+    const current = generation;
+    const request = new AbortController();
+    couponRequest = request;
+    $('coupon-preview').disabled = true;
+    $('coupon-form').setAttribute('aria-busy', 'true');
+    couponMessage('正在向服务器核价…');
+    try {
+      const quote = await api('/checkout/quote', {method:'POST', body:{planId:plan.id, couponCode}, controller:request});
+      if (generation !== current || couponRequest !== request) return;
+      if (quote?.planId !== plan.id || !Number.isSafeInteger(quote.credits) || quote.credits < 1
+        || !Number.isSafeInteger(quote.originalAmountFen) || !Number.isSafeInteger(quote.discountFen) || !Number.isSafeInteger(quote.amountFen)
+        || quote.discountFen < 1 || quote.amountFen < 1 || quote.originalAmountFen - quote.discountFen !== quote.amountFen)
+        throw new ApiError('报价无效。');
+      confirmedQuote = {planId:plan.id, couponCode, credits:quote.credits, originalAmountFen:quote.originalAmountFen, discountFen:quote.discountFen, amountFen:quote.amountFen};
+      $('quote-credits').textContent = formatNumber(quote.credits);
+      $('quote-original').textContent = formatMoney(quote.originalAmountFen);
+      $('quote-discount').textContent = '−' + formatMoney(quote.discountFen);
+      $('quote-total').textContent = formatMoney(quote.amountFen);
+      $('coupon-quote').hidden = false;
+      $('coupon-confirm').hidden = false;
+      $('coupon-confirm').disabled = false;
+      couponMessage('核价成功，应付 ' + formatMoney(quote.amountFen) + '。请确认后创建订单。', 'success');
+    } catch (error) {
+      if (generation !== current || couponRequest !== request) return;
+      const detail = error.status === 404 || error.status === 405 ? couponsUnsupported
+        : error.status === 400 || error.status === 409 ? '此优惠码不可用于当前方案，请核对或更换。'
+        : error.status === 429 ? '核价请求较频繁，请稍后重试。' : '暂时无法核实折后价，请稍后重试。';
+      couponMessage(detail, 'error');
+    } finally {
+      if (generation === current && couponRequest === request) {
+        couponRequest = null;
+        $('coupon-preview').disabled = false;
+        $('coupon-form').setAttribute('aria-busy', 'false');
+      }
+    }
+  }
+
+  $('coupon-code').addEventListener('input', invalidateQuote);
+  $('coupon-form').addEventListener('submit', event => { event.preventDefault(); return previewCoupon(); });
+  $('coupon-cancel').addEventListener('click', () => {
+    closeCoupon();
+    $('plans-title').focus();
+  });
+  $('coupon-confirm').addEventListener('click', () => {
+    if (couponPlan && confirmedQuote && confirmedQuote.couponCode === $('coupon-code').value.trim())
+      return createOrder(couponPlan, confirmedQuote);
+  });
+
   function showCheckout(order) {
     checkoutOrderId = order.id;
     const panel = $('checkout-message'); panel.replaceChildren(); panel.hidden = false;
     panel.dataset.tone = 'info';
-    panel.append(node('p', '订单已创建：' + formatNumber(order.credits) + ' 积分，' + formatMoney(order.amountFen) + '。'));
+    if (order.status !== 'pending') { resolveCheckout(order); return; }
+    panel.append(node('p', '订单已创建，' + formatNumber(order.credits) + ' 积分，应付 ' + formatMoney(order.amountFen) + '。'));
     const link = paymentLink(order.payUrl);
     if (link) panel.append(link, node('p', '付款后回到这里，在订单列表点击「核验到账」。请勿重复付款。', 'form-hint'));
     else panel.append(node('p', '付款入口目前不可用，请稍后刷新订单。', 'form-hint'));
@@ -447,19 +568,33 @@
     panel.dataset.tone = order.status === 'paid' ? 'success' : 'info';
   }
 
-  async function createOrder(plan) {
+  async function createOrder(plan, quote = null) {
     if (checkoutBusy || !token) return;
     checkoutBusy = true;
     const current = generation;
-    const requestId = pendingRequests.get(plan.id) || crypto.randomUUID();
-    pendingRequests.set(plan.id, requestId);
+    // An uncertain POST must only be retried with the same endpoint, code, amount and request ID.
+    const attempt = pendingRequests.get(plan.id) || {requestId:crypto.randomUUID(), quote};
+    pendingRequests.set(plan.id, attempt);
+    quote = attempt.quote;
+    let rejectedMessage = '';
+    closeCoupon();
+    checkoutOrderId = '';
+    $('checkout-message').replaceChildren();
+    $('checkout-message').hidden = true;
     renderPlans(); message('正在创建订单…');
     try {
-      const order = await api('/orders', { method: 'POST', body: { planId: plan.id, requestId } });
+      const body = {planId:plan.id, requestId:attempt.requestId};
+      if (quote) Object.assign(body, {couponCode:quote.couponCode, expectedAmountFen:quote.amountFen});
+      const order = await api(quote ? '/checkout/orders' : '/orders', {method:'POST', body});
       if (current !== generation) return;
       if (!order || typeof order.id !== 'string' || !/^[a-f0-9]{32}$/.test(order.id)
         || typeof order.status !== 'string' || !Number.isSafeInteger(order.credits) || !Number.isSafeInteger(order.amountFen))
         throw new ApiError('订单响应不完整，请重试同一方案或刷新订单列表。');
+      if (quote && ['planId', 'credits', 'amountFen', 'originalAmountFen', 'discountFen'].some(key => order[key] !== quote[key])) {
+        mismatchedOrders.add(order.id);
+        createdOrders.delete(plan.id);
+        throw new ApiError('订单与已确认的报价不符，请勿付款。', 409, 'quote_mismatch');
+      }
       pendingRequests.delete(plan.id);
       createdOrders.set(plan.id, order);
       showCheckout(order);
@@ -469,9 +604,29 @@
       if (current !== generation) return;
       await loadDashboard();
     } catch (error) {
-      if (current === generation) message(error.message + (error.status === 0 ? ' 再次点击将复用本次请求编号。' : ''), 'error');
+      if (current !== generation) return;
+      if (quote && error.status >= 400 && error.status < 500 && ![408,429].includes(error.status)) {
+        pendingRequests.delete(plan.id);
+        rejectedMessage = error.status === 404 || error.status === 405 ? couponsUnsupported
+          : error.code === 'quote_mismatch' ? error.message : '优惠订单未获确认，请重新核价后再试。';
+        message(rejectedMessage, 'error');
+      } else {
+        const detail = quote ? '暂时无法确认优惠订单。请重试创建订单，将复用原优惠码、价格和请求编号。'
+          : error.message + (error.status === 0 ? ' 再次点击将复用本次请求编号。' : '');
+        message(detail, 'error');
+        const panel = $('checkout-message');
+        panel.textContent = detail; panel.dataset.tone = 'error'; panel.hidden = false;
+      }
     } finally {
-      if (current === generation) { checkoutBusy = false; renderPlans(); }
+      if (current === generation) {
+        checkoutBusy = false;
+        renderPlans();
+        if (rejectedMessage) {
+          openCoupon(plan);
+          $('coupon-code').value = quote.couponCode;
+          couponMessage(rejectedMessage, 'error');
+        }
+      }
     }
   }
 

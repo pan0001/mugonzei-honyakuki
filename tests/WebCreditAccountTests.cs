@@ -56,6 +56,43 @@ internal static class WebCreditAccountTests
             await Run("window.chrome.webview.postMessage({type:'pay',id:'bad-link'});");
             await Wait("document.querySelector('#notice').textContent.includes('未打开浏览器')");
             if (urls.Count != 1) throw new Exception("Untrusted checkout was opened");
+            async Task ApplyCoupon(string value)
+            {
+                await Run($"{{const input = document.querySelector('#coupon-code'); input.value = '{value}'; input.dispatchEvent(new Event('input')); document.querySelector('#plans button').click();}}");
+            }
+            await ApplyCoupon("unsupported");
+            await Wait("document.querySelector('#notice').textContent.includes('不支持优惠码') && !document.querySelector('#refresh').disabled");
+            if (urls.Count != 1 || api.Purchases != 1 || api.DiscountOrders != 0)
+                throw new Exception("Unsupported coupon server fell back to a full-price order");
+            await ApplyCoupon("price-changed");
+            await Wait("!document.querySelector('#coupon-quote').hidden && !document.querySelector('#confirm-coupon').disabled");
+            await Run("document.querySelector('#confirm-coupon').click()");
+            await Wait("document.querySelector('#coupon-quote').hidden && document.querySelector('#notice').textContent.includes('不一致') && !document.querySelector('#refresh').disabled");
+            if (urls.Count != 1) throw new Exception("An order at a different price opened a payment link");
+            await Run("document.querySelector('#refresh').click()");
+            await Wait("[...document.querySelectorAll('#orders article')].some(e => e.textContent.includes('coupon-review') && e.textContent.includes('已阻止付款') && !e.textContent.includes('去付款')) && !document.querySelector('#refresh').disabled");
+            await Run("window.chrome.webview.postMessage({type:'pay',id:'coupon-review'})");
+            await Wait("document.querySelector('#notice').textContent.includes('该订单已阻止付款') && !document.querySelector('#refresh').disabled");
+            using (var reopened = new WebCreditAccount(new CreditServiceClient(Endpoint, store, new FixtureHttp(recent) { IncludeReviewOrder = true }),
+                _ => { }, urls.Add))
+            {
+                await reopened.Receive(JsonSerializer.SerializeToElement(new { type = "ready" }));
+                await reopened.Receive(JsonSerializer.SerializeToElement(new { type = "pay", id = "coupon-review" }));
+            }
+            if (urls.Count != 1) throw new Exception("Refreshing or reopening the account allowed payment of a rejected order");
+            await ApplyCoupon("fixture-coupon");
+            await Wait("document.querySelector('#quote-total').textContent.includes('应付 ¥0.75') && document.querySelector('#quote-details').textContent.includes('原价 ¥1.00 · 优惠 ¥0.25') && !document.querySelector('#refresh').disabled");
+            if (urls.Count != 1 || api.DiscountOrders != 1) throw new Exception("Getting a quote started payment");
+            await Run("document.querySelector('#coupon-code').value = 'changed'; document.querySelector('#coupon-code').dispatchEvent(new Event('input'));");
+            await Wait("document.querySelector('#coupon-quote').hidden");
+            await ApplyCoupon("fixture-coupon");
+            await Wait("!document.querySelector('#coupon-quote').hidden && !document.querySelector('#confirm-coupon').disabled");
+            await Run("document.querySelector('#confirm-coupon').click()");
+            await Wait("document.querySelector('#notice').textContent.includes('稍后重试') && !document.querySelector('#confirm-coupon').disabled");
+            await Run("document.querySelector('#confirm-coupon').click()");
+            await Wait("document.querySelector('#coupon-quote').hidden && document.querySelector('#coupon-code').value === '' && document.querySelector('#notice').textContent.includes('已打开付款页面') && !document.querySelector('#refresh').disabled");
+            if (urls.Count != 2 || urls.Last().AbsoluteUri != Checkout || api.DiscountOrders != 3 || api.Purchases != 1)
+                throw new Exception("Confirmed discounted purchase or idempotent retry failed");
             await Run("document.querySelector('[data-page=history]').click();window.chrome.webview.postMessage({type:'verify',id:'ours'});");
             await Wait("document.querySelector('#orders').textContent.includes('已到账') && !document.querySelector('#refresh').disabled");
             await Run("document.querySelector('[data-page=recovery]').click();document.querySelector('#recover').click()");
@@ -64,9 +101,9 @@ internal static class WebCreditAccountTests
             await Wait("document.querySelector('#task-status').textContent==='已取消' && !document.querySelector('#refresh').disabled");
             await Run("document.querySelector('#logout').click()");
             await Wait("document.querySelector('#content').hidden && document.querySelector('#translation').textContent===''");
-            if (store.Load(Endpoint) != null || nativeMessages.Any(message => message.Contains(Session) || message.Contains(Code) || message.Contains("private-fixture-checkout")))
+            if (store.Load(Endpoint) != null || nativeMessages.Any(message => message.Contains(Session) || message.Contains(Code) || message.Contains("fixture-coupon") || message.Contains("private-fixture-checkout")))
                 throw new Exception("A credential or checkout query escaped the native boundary");
-            Console.WriteLine("PASS WebView2 account balance, redemption, validated checkout, order verification, ledger, recovery, cancellation and sign-out using isolated fixtures");
+            Console.WriteLine("PASS WebView2 account, redemption, ordinary checkout, coupon quotes, price confirmation, safe retries, order verification, recovery and sign-out using isolated fixtures");
         }
         finally
         {
@@ -82,8 +119,10 @@ internal static class WebCreditAccountTests
 
     private sealed class FixtureHttp(Guid recent) : HttpMessageHandler
     {
-        internal int Purchases;
+        internal int Purchases, DiscountOrders;
+        internal bool IncludeReviewOrder;
         private int balance = 5;
+        private Guid? retryId;
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
@@ -104,11 +143,42 @@ internal static class WebCreditAccountTests
                     response = new { balance, reserved = 1, credits = 10, reference = "redeem-fixture" }; break;
                 case "/v1/orders" when request.Method == HttpMethod.Post:
                     using (var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken)))
-                        if (body.RootElement.GetProperty("planId").GetString() != "test-plan" || body.RootElement.GetProperty("requestId").GetGuid() == Guid.Empty)
+                        if (body.RootElement.GetProperty("planId").GetString() != "test-plan" || body.RootElement.GetProperty("requestId").GetGuid() == Guid.Empty
+                            || body.RootElement.EnumerateObject().Count() != 2)
                             throw new Exception("Wrong plan or missing idempotency key");
                     Purchases++;
                     response = Order("ours", Checkout); break;
-                case "/v1/orders": response = new[] { Order("bad-link", "https://unexpected.example/pay") }; break;
+                case "/v1/checkout/quote":
+                    using (var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken)))
+                    {
+                        if (body.RootElement.GetProperty("couponCode").GetString() == "unsupported")
+                            return new HttpResponseMessage(HttpStatusCode.NotFound);
+                        response = new { planId = "test-plan", originalAmountFen = 100, discountFen = 25, amountFen = 75, credits = 10 };
+                    }
+                    break;
+                case "/v1/checkout/orders":
+                    using (var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken)))
+                    {
+                        DiscountOrders++;
+                        string? coupon = body.RootElement.GetProperty("couponCode").GetString();
+                        Guid id = body.RootElement.GetProperty("requestId").GetGuid();
+                        if (id == Guid.Empty || body.RootElement.GetProperty("expectedAmountFen").GetInt32() != 75)
+                            throw new Exception("Discounted order does not bind to the confirmed quote");
+                        if (coupon == "fixture-coupon")
+                        {
+                            if (retryId == null) { retryId = id; return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable); }
+                            if (retryId != id) throw new Exception("Discounted order retry used a new idempotency key");
+                        }
+                        int actual = coupon == "price-changed" ? 90 : 75;
+                        if (coupon == "price-changed") IncludeReviewOrder = true;
+                        response = new { id = coupon == "price-changed" ? "coupon-review" : "discounted", planId = "test-plan", status = "pending", credits = 10, amountFen = actual,
+                            originalAmountFen = 100, discountFen = 100 - actual, payUrl = Checkout, createdAt = DateTimeOffset.UtcNow };
+                    }
+                    break;
+                case "/v1/orders":
+                    response = IncludeReviewOrder ? new[] { Order("bad-link", "https://unexpected.example/pay"), Order("coupon-review", Checkout), Order("ours", Checkout) }
+                        : new[] { Order("bad-link", "https://unexpected.example/pay") };
+                    break;
                 case "/v1/orders/ours" when uri.Query == "?refresh=true": response = Order("ours", Checkout, "paid"); break;
                 case "/v1/auth/logout": return new HttpResponseMessage(HttpStatusCode.NoContent);
                 default:

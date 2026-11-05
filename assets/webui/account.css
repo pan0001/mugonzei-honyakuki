@@ -10,6 +10,9 @@ nav { border-bottom:1px solid var(--line); gap:18px; margin-bottom:20px; overflo
 form { max-width:490px } input { min-width:0; flex:1; background:#111b20 } form button,.buy { color:#0e2a1f; background:var(--accent); border-color:var(--accent); font-weight:600 }
 .plans { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:10px } .plan { border:1px solid var(--line); border-radius:12px; padding:16px; background:var(--card) }
 .plan strong { display:block; font-size:1.18rem; margin-bottom:2px } .plan button { margin-top:12px }
+.coupon-field { display:grid; gap:5px; max-width:420px; margin-bottom:12px } .coupon-field label { color:var(--muted); font-size:.9rem }
+.quote { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:12px; padding:14px 16px; margin-top:12px; border:1px solid var(--accent); border-radius:12px }
+#quote-total { margin-top:4px; font-weight:600; color:var(--accent) }
 .entry { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:8px 12px; padding:12px 0; border-bottom:1px solid var(--line) } .entry p { margin-bottom:2px }
 .entry time,.ref { display:block; font-size:.8rem } .entry .actions { flex-wrap:wrap } .empty { padding:6px 0 }
 #task-status { color:var(--accent); margin:14px 0 } pre { white-space:pre-wrap; overflow-wrap:anywhere; margin:0; font:inherit }

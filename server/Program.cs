@@ -9,6 +9,7 @@ using Mugonzei.Server;
 
 if (args.Length > 0 && args[0] == "refund") { Environment.ExitCode = RefundCommands.Run(args); return; }
 if (args.Length > 0 && args[0] == "codes") { Environment.ExitCode = RedemptionCommands.Run(args); return; }
+if (args.Length > 0 && args[0] == "coupons") { Environment.ExitCode = CouponCommands.Run(args); return; }
 await MugonzeiHost.RunAsync(args);
 
 public static class MugonzeiHost
@@ -69,6 +70,7 @@ public static class MugonzeiHost
                 _ => new FixedWindowRateLimiterOptions { PermitLimit = count, Window = TimeSpan.FromMinutes(1), QueueLimit = 0 }));
             Policy("email-send", 5); Policy("auth", 10); Policy("payment", 20, true); Policy("webhook", 60); Policy("translation-submit", 20, true);
             Policy("redemption", 10, true);
+            Policy("coupon-quote", 12, true);
             Policy("translation-cancel", 60, true);
         });
 
@@ -140,8 +142,22 @@ public static class MugonzeiHost
                 if (!PaymentService.IsLoopback(context)) throw new ApiException(403, "loopback_required", "模拟支付仅允许本机访问。");
                 payUrl = context.Request.Scheme + "://" + context.Request.Host + payUrl;
             }
-            return new { order.Id, order.Status, payUrl, order.Credits, order.AmountFen, order.CreatedAt };
+            return new { order.Id, order.Status, payUrl, order.PlanId, order.Credits, order.OriginalAmountFen, order.DiscountFen, order.AmountFen, order.CreatedAt };
         }
+        app.MapPost("/v1/checkout/quote", (CouponQuoteRequest input, HttpContext context, PaymentService payments) =>
+        {
+            _ = AuthService.UserId(context);
+            return payments.Quote(input.PlanId, CouponRequired(input.CouponCode));
+        }).RequireRateLimiting("coupon-quote");
+        // Dedicated route: an older server must return 404 rather than ignore the code and charge full price.
+        app.MapPost("/v1/checkout/orders", (CouponOrderRequest input, HttpContext context, PaymentService payments) =>
+        {
+            var user = AuthService.UserId(context);
+            if (input.ExpectedAmountFen is not > 0)
+                throw new ApiException(400, "quote_required", "请先核对优惠后的应付金额。");
+            return OrderReply(context, payments.CreateOrder(user, input.RequestId, input.PlanId,
+                CouponRequired(input.CouponCode), input.ExpectedAmountFen));
+        }).RequireRateLimiting("payment");
         app.MapPost("/v1/orders", (CreateOrderRequest input, HttpContext context, PaymentService payments) =>
             OrderReply(context, payments.CreateOrder(AuthService.UserId(context), input.RequestId, input.PlanId))).RequireRateLimiting("payment");
         app.MapGet("/v1/orders", (HttpContext context, Store store) =>
@@ -174,6 +190,8 @@ public static class MugonzeiHost
                 LocalOnly(context); var order = store.GetMockOrder(id);
                 string content = "<!doctype html><html lang=zh><meta charset=utf-8><title>本机模拟支付</title><h1>本机模拟支付</h1><p>"
                     + HtmlEncoder.Default.Encode(order.Name) + "：" + order.Credits + " 积分。此页面不收取真实款项。</p>"
+                    + (order.DiscountFen > 0 ? FormattableString.Invariant($"<p>原价 ¥{order.OriginalAmountFen / 100m:F2}，优惠 ¥{order.DiscountFen / 100m:F2}。</p>") : "")
+                    + FormattableString.Invariant($"<p>应付 ¥{order.AmountFen / 100m:F2}。</p>")
                     + (order.Status == "paid" ? "<p>模拟到账已完成。</p>" : "<form method=post><input type=hidden name=confirmation value=\""
                         + HtmlEncoder.Default.Encode(order.CustomId) + "\"><button type=submit>确认模拟到账</button></form>") + "</html>";
                 return Results.Content(content, "text/html; charset=utf-8");
@@ -192,7 +210,15 @@ public static class MugonzeiHost
         TranslationEndpoints.MapTranslationEndpoints(app);
         await app.RunAsync();
     }
+
+    private static string CouponRequired(string? code) => !string.IsNullOrWhiteSpace(code) && code.Length <= 80 ? code
+        : throw new ApiException(400, "coupon_unavailable", "请输入有效的付款优惠码。");
 }
 
+[System.Text.Json.Serialization.JsonUnmappedMemberHandling(System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow)]
 public sealed record CreateOrderRequest(string PlanId, string RequestId);
+[System.Text.Json.Serialization.JsonUnmappedMemberHandling(System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow)]
+public sealed record CouponQuoteRequest(string PlanId, string? CouponCode);
+[System.Text.Json.Serialization.JsonUnmappedMemberHandling(System.Text.Json.Serialization.JsonUnmappedMemberHandling.Disallow)]
+public sealed record CouponOrderRequest(string PlanId, string RequestId, string? CouponCode, int? ExpectedAmountFen);
 public partial class Program { }

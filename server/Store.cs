@@ -8,7 +8,11 @@ public sealed record UserRecord(string Id, string Username, byte[] PasswordHash,
 public sealed record AccountRecord(string Username, long Balance, long Reserved);
 public sealed record LedgerRecord(string Kind, long Amount, long Balance, DateTimeOffset CreatedAt, string Reference);
 public sealed record OrderRecord(string Id, string UserId, string RequestId, string PlanId, string Name,
-    int Credits, int AmountFen, string AfdianPlanId, string CustomId, string Status, DateTimeOffset CreatedAt);
+    int Credits, int AmountFen, string AfdianPlanId, string CustomId, string Status, DateTimeOffset CreatedAt)
+{
+    public int OriginalAmountFen { get; init; } = AmountFen;
+    public int DiscountFen => OriginalAmountFen - AmountFen;
+}
 public sealed record RefundRecord(string Id, string OrderId, string Status, int Credits, DateTimeOffset CreatedAt);
 
 /// <summary>All monetary state transitions occur in immediate SQLite transactions.</summary>
@@ -51,6 +55,7 @@ public sealed partial class Store
             """);
         InitializeRedemptionSchema(db);
         InitializeEmailSchema(db);
+        InitializeCouponSchema(db);
     }
 
     private SqliteConnection Open()
@@ -126,29 +131,55 @@ public sealed partial class Store
             ("$user", userId), ("$kind", kind), ("$amount", amount), ("$balance", Account(db, tx, userId).Balance), ("$time", Now()), ("$ref", reference));
     }
 
-    public OrderRecord CreateOrder(string userId, string requestId, Plan plan)
+    public OrderRecord CreateOrder(string userId, string requestId, Plan plan) =>
+        CreateOrder(userId, requestId, [plan], plan.Id, null, null);
+
+    internal OrderRecord CreateOrder(string userId, string requestId, IReadOnlyList<Plan> plans, string planId,
+        string? couponCode, int? expectedAmountFen)
     {
+        string? hash = couponCode is null ? null : CouponHash(couponCode);
         requestId = Id(requestId); using var db = Open(); using var tx = db.BeginTransaction();
         var existing = ReadOrder(db, tx, "user_id=$user AND request_id=$request", ("$user", userId), ("$request", requestId));
         if (existing is not null)
         {
-            if (existing.PlanId != plan.Id) throw new ApiException(409, "request_conflict", "同一请求编号不能用于其他充值计划。");
+            string? previousHash = null;
+            if (existing.DiscountFen > 0)
+            {
+                using var command = Command(db, tx, """
+                    SELECT c.code_hash FROM order_coupons d JOIN coupons c ON c.id=d.coupon_id WHERE d.order_id=$id
+                    """, ("$id", existing.Id));
+                previousHash = (string?)command.ExecuteScalar();
+            }
+            if (existing.PlanId != planId || previousHash != hash)
+                throw new ApiException(409, "request_conflict", "同一请求编号不能更换套餐或优惠码。");
+            ConfirmPrice(existing.AmountFen, expectedAmountFen, hash is not null);
             tx.Commit(); return existing;
         }
         _ = Account(db, tx, userId);
+        var plan = CheckoutPlan(plans, planId);
+        var price = ResolvePrice(db, tx, plans, plan, hash);
+        ConfirmPrice(price.Quote.AmountFen, expectedAmountFen, hash is not null);
         var order = new OrderRecord(Guid.NewGuid().ToString("N"), userId, requestId, plan.Id, plan.Name,
-            plan.Credits, plan.AmountFen, plan.AfdianPlanId, Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant(), "pending", DateTimeOffset.UtcNow);
+            plan.Credits, price.Quote.AmountFen, price.ProviderPlanId, Convert.ToHexString(RandomNumberGenerator.GetBytes(24)).ToLowerInvariant(),
+            "pending", DateTimeOffset.UtcNow) { OriginalAmountFen = plan.AmountFen };
         Execute(db, tx, """
             INSERT INTO orders(id,user_id,request_id,plan_id,name,credits,amount_fen,afdian_plan_id,custom_id,status,created_at)
             VALUES($id,$user,$request,$plan,$name,$credits,$amount,$afdian,$custom,'pending',$created)
             """, ("$id", order.Id), ("$user", userId), ("$request", requestId), ("$plan", plan.Id), ("$name", plan.Name),
-            ("$credits", plan.Credits), ("$amount", plan.AmountFen), ("$afdian", plan.AfdianPlanId), ("$custom", order.CustomId),
+            ("$credits", order.Credits), ("$amount", order.AmountFen), ("$afdian", order.AfdianPlanId), ("$custom", order.CustomId),
             ("$created", order.CreatedAt.ToString("O", CultureInfo.InvariantCulture)));
+        if (price.CouponId is not null)
+            Execute(db, tx, "INSERT INTO order_coupons(order_id,coupon_id,original_amount_fen) VALUES($order,$coupon,$original)",
+                ("$order", order.Id), ("$coupon", price.CouponId), ("$original", order.OriginalAmountFen));
         tx.Commit(); return order;
     }
-    private const string OrderColumns = "id,user_id,request_id,plan_id,name,credits,amount_fen,afdian_plan_id,custom_id,status,created_at";
+    private const string OrderColumns = """
+        id,user_id,request_id,plan_id,name,credits,amount_fen,afdian_plan_id,custom_id,status,created_at,
+        COALESCE((SELECT original_amount_fen FROM order_coupons WHERE order_id=orders.id),amount_fen)
+        """;
     private static OrderRecord Order(SqliteDataReader r) => new(r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4),
-        r.GetInt32(5), r.GetInt32(6), r.GetString(7), r.GetString(8), r.GetString(9), Date(r.GetString(10)));
+        r.GetInt32(5), r.GetInt32(6), r.GetString(7), r.GetString(8), r.GetString(9), Date(r.GetString(10)))
+        { OriginalAmountFen = r.GetInt32(11) };
     private static OrderRecord? ReadOrder(SqliteConnection db, SqliteTransaction? tx, string where, params (string, object?)[] values)
     {
         using var command = Command(db, tx, "SELECT " + OrderColumns + " FROM orders WHERE " + where, values);
@@ -178,7 +209,9 @@ public sealed partial class Store
         using (var duplicate = Command(db, tx, "SELECT id FROM orders WHERE provider_trade_no=$trade", ("$trade", providerTradeNo)))
             if (duplicate.ExecuteScalar() is not null) throw new ApiException(409, "payment_used", "该支付订单已被处理。");
         Execute(db, tx, "UPDATE orders SET status='paid',provider_trade_no=$trade WHERE id=$id", ("$trade", providerTradeNo), ("$id", order.Id));
-        Execute(db, tx, "UPDATE users SET balance=balance+$amount WHERE id=$user", ("$amount", order.Credits), ("$user", order.UserId));
+        if (Execute(db, tx, "UPDATE users SET balance=balance+$amount WHERE id=$user AND balance<=$limit",
+            ("$amount", order.Credits), ("$user", order.UserId), ("$limit", long.MaxValue - order.Credits)) != 1)
+            throw new ApiException(409, "credit_limit", "积分余额已达到上限，暂时无法入账。");
         Ledger(db, tx, order.UserId, "recharge", order.Credits, "payment:" + providerTradeNo);
         tx.Commit(); return order with { Status = "paid" };
     }

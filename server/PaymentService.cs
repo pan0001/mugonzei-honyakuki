@@ -73,11 +73,22 @@ public sealed class PaymentService(Store store, ServerOptions options, IAfdianCl
     // guard cannot grow with the lifetime order count.
     private readonly ConcurrentDictionary<string, byte> refreshing = new();
 
-    public OrderRecord CreateOrder(string userId, string requestId, string planId)
+    private void RequireCheckout()
     {
         if (!options.LivePayments && !options.MockPayments)
             throw new ApiException(503, "payments_disabled", "充值尚未开放。");
-        return store.CreateOrder(userId, requestId, options.GetPlan(planId));
+    }
+
+    public PriceQuote Quote(string planId, string? couponCode = null)
+    {
+        RequireCheckout();
+        return store.Quote(options.Plans, planId, couponCode);
+    }
+
+    public OrderRecord CreateOrder(string userId, string requestId, string planId, string? couponCode = null, int? expectedAmountFen = null)
+    {
+        RequireCheckout();
+        return store.CreateOrder(userId, requestId, options.Plans, planId, couponCode, expectedAmountFen);
     }
 
     public async Task<OrderRecord> RefreshAsync(string userId, string id, CancellationToken token)

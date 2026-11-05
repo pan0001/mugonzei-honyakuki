@@ -79,7 +79,27 @@
         <p id="redemption-message" class="status-message" role="status" aria-label="兑换结果" aria-live="polite" aria-atomic="true" hidden></p>
       </section>
       <div class="account-grid">
-        <section class="panel" aria-labelledby="plans-title"><div class="section-heading"><h3 id="plans-title">补充一点理解力</h3><span class="muted">积分充值</span></div><p class="muted">在要充值的账户中创建订单，从订单链接前往爱发电，选择 1 个月并核对金额后付款。返回这里点击「核验到账」。首笔真实付款的到账流程仍待验证。</p><div id="plans" class="plan-list"><p class="empty-state">正在读取方案…</p></div><div id="checkout-message" class="status-message" role="status" aria-live="polite" hidden></div></section>
+        <section class="panel" aria-labelledby="plans-title">
+          <div class="section-heading"><h3 id="plans-title" tabindex="-1">购买积分</h3></div>
+          <p class="muted">选择充值方案。有优惠码可先查看折后价。前往爱发电后，选择 1 个月并核对付款金额，付款后返回这里核验到账。首笔真实付款的到账流程仍待验证。</p>
+          <div id="plans" class="plan-list"><p class="empty-state">正在读取方案…</p></div>
+          <section id="coupon-panel" class="coupon-panel" aria-labelledby="coupon-title" hidden>
+            <h4 id="coupon-title">使用优惠码</h4>
+            <form id="coupon-form" autocomplete="off" method="post" action="/v1/checkout/quote">
+              <div class="form-row"><label for="coupon-code">优惠码</label><input id="coupon-code" type="text" required maxlength="80" spellcheck="false" autocomplete="off"></div>
+              <button id="coupon-preview" class="button button-ghost" type="submit">查看折后价</button>
+            </form>
+            <p id="coupon-message" class="status-message" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+            <dl id="coupon-quote" class="coupon-quote" hidden>
+              <div><dt>可获积分</dt><dd id="quote-credits"></dd></div>
+              <div><dt>原价</dt><dd id="quote-original"></dd></div>
+              <div><dt>优惠</dt><dd id="quote-discount"></dd></div>
+              <div class="quote-total"><dt>应付金额</dt><dd id="quote-total"></dd></div>
+            </dl>
+            <div class="inline-actions"><button id="coupon-confirm" type="button" class="button button-primary" hidden disabled>确认价格并创建订单</button><button id="coupon-cancel" type="button" class="button button-ghost button-small">放弃使用优惠码</button></div>
+          </section>
+          <div id="checkout-message" class="status-message" role="status" aria-live="polite" hidden></div>
+        </section>
         <aside class="panel account-help"><h3>在桌面客户端使用积分</h3><ol class="account-steps"><li>在桌面客户端选择「积分服务」。</li><li>服务地址填写 <code>https://api.mugonzei.top</code>。</li><li>登录此账户，查看余额和服务状态。</li></ol><p class="form-hint">托管 AI 的可用情况可在客户端查看。</p><a class="text-link" href="/#main">还没有客户端？去下载 ↗</a></aside>
       </div>
       <section class="panel" aria-labelledby="orders-title"><div class="section-heading"><h3 id="orders-title">充值订单</h3><span class="muted">最近 100 条</span></div><p class="form-hint">付款后点击对应订单的「核验到账」。刷新账户只读取已记录状态。</p><div class="table-wrap"><table class="data-table"><caption class="sr-only">充值订单和支付状态</caption><thead><tr><th scope="col">创建时间</th><th scope="col">订单</th><th scope="col">积分 / 金额</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody id="orders-body"><tr><td colspan="5" class="empty-state">正在读取订单…</td></tr></tbody></table></div></section>
