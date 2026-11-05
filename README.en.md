@@ -8,7 +8,7 @@
 
 Translate handwritten or printed text on a Windows desktop or in SteamVR, with subtitles near the bottom of the monitor or headset view.
 
-[Download for Windows](https://github.com/pan0001/mugonzei-honyakuki/releases) · [Report an issue](https://github.com/pan0001/mugonzei-honyakuki/issues)
+[Windows x64 installer · v0.2.5-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.5-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.5-preview.exe) · [Portable ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.5-preview/Mugonzei-Honyakuki-win-x64-v0.2.5-preview.zip) · [Report an issue](https://github.com/pan0001/mugonzei-honyakuki/issues)
 
 **Example: translating a station sign into Simplified Chinese**
 
@@ -36,13 +36,13 @@ Translate handwritten or printed text on a Windows desktop or in SteamVR, with s
 - Codex mode: an installed Codex CLI with an active login. It calls an online model; inference is not offline.
 - Other AI APIs: an available compatible service. Image analysis requires image input support, and AI handwriting mode also requires support for multiple images in one request.
 - The embedded interface requires the [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/). It loads from the installed files. Google Translate also requires internet access.
-- The portable package includes the .NET runtime, Tesseract language models, and the local Japanese OCR runtime. Building from source requires the .NET 10 SDK and an internet connection when preparing dependencies for the first time.
+- Both the installer and the portable ZIP include the .NET runtime, Tesseract language models, and the local Japanese OCR runtime. Building from source requires the .NET 10 SDK and an internet connection when preparing dependencies for the first time.
 
 The desktop interface is currently mainly in Simplified Chinese. This repository provides documentation in Chinese, Japanese, and English. Chinese UI labels are retained below so you can find the corresponding controls.
 
 ## Quick start
 
-1. [Download the published Windows portable build](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.3-preview/Mugonzei-Honyakuki-win-x64-v0.2.3-preview.zip), extract the complete archive, and run `SteamVrTranslator.exe`. GitHub’s `Source code` ZIP is for developers. The steps below describe the development build; the published v0.2.3 interface differs.
+1. Run the Windows installer for your user account, then open **Mugonzei Honyakuki** from the Start menu. For the portable version, extract the entire ZIP to a folder you can write to and run `SteamVrTranslator.exe`.
 2. Choose the account credit service, your own API, local Codex, or local OCR with Google Translate.
 3. The credit service opens a dedicated sign-in page before mode selection. Your own API, Codex and Google Translate do not require a credit account.
 4. Leave the mode on Auto: **Ctrl+Alt+T** captures your primary monitor until you start SteamVR yourself. After it connects, hold **left X for 1.5 seconds** to translate. Closing SteamVR returns to the desktop. Select Desktop to stay there, or Auto to resume following SteamVR. No mode launches SteamVR.
@@ -57,7 +57,7 @@ If `VCRUNTIME140.dll` or `MSVCP140.dll` is missing, install Microsoft's [Visual 
 
 ## Upgrading and incremental updates
 
-To upgrade to `0.1.1-preview` or a later version, exit the old instance first, extract the entire new archive into a new directory, then run the new version. Settings remain in `%LOCALAPPDATA%/SteamVrTranslator/` and are not overwritten by changing the application directory. You do not need to copy program files from the old directory or repeat first-time setup.
+Exit the app before upgrading. Run the new installer to update the existing installation. For the portable version, extract the entire new ZIP to a new folder and run `SteamVrTranslator.exe` from there. Both versions reuse the settings and saved keys in `%LOCALAPPDATA%/SteamVrTranslator/`.
 
 To update a Git source checkout, run the following commands in the existing repository, then launch the newly built application:
 

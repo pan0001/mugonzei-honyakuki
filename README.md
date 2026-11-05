@@ -8,7 +8,7 @@
 
 在 Windows 桌面或 SteamVR 中截取手写和印刷文字，在屏幕或头显下方阅读翻译字幕。
 
-[下载 Windows 版](https://github.com/pan0001/mugonzei-honyakuki/releases) · [反馈问题](https://github.com/pan0001/mugonzei-honyakuki/issues)
+[Windows x64 安装程序 · v0.2.5-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.5-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.5-preview.exe) · [便携 ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.5-preview/Mugonzei-Honyakuki-win-x64-v0.2.5-preview.zip) · [反馈问题](https://github.com/pan0001/mugonzei-honyakuki/issues)
 
 **工作台示例**
 
@@ -36,13 +36,13 @@
 - Codex 模式：已安装并登录的 Codex CLI；它会调用在线模型，不是离线推理。
 - 其他 AI API：可用的兼容服务；识图需支持图片输入，AI 手写模式还需支持多图输入。
 - 内嵌界面需要 [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/)。界面从安装目录加载；Google 翻译另外需要联网。
-- 便携包包含 .NET 运行时、Tesseract 语言模型与本地日语 OCR 运行时。源码构建需要 .NET 10 SDK，首次准备依赖时需要联网。
+- 安装版和便携版均包含 .NET 运行时、Tesseract 语言模型与本地日语 OCR 运行时。源码构建需要 .NET 10 SDK，首次准备依赖时需要联网。
 
 目前桌面界面主要为简体中文；本仓库提供中、日、英三语说明。
 
 ## 快速开始
 
-1. [下载已发布的 Windows 便携版](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.3-preview/Mugonzei-Honyakuki-win-x64-v0.2.3-preview.zip)，完整解压后运行目录中的 `SteamVrTranslator.exe`。GitHub 的 `Source code` 只含源码。以下是开发版的新流程，已发布的 v0.2.3 界面有所不同。
+1. 运行 Windows 安装程序，按提示为当前用户安装，再从开始菜单打开「Mugonzei Honyakuki」。使用便携版时，将 ZIP 完整解压到可写目录，再运行 `SteamVrTranslator.exe`。
 2. 选择翻译服务：账号积分服务、自备 API、本机 Codex 或本地 OCR + Google 翻译。
 3. 账号积分服务使用独立登录页；登录成功后选择使用模式。自备 API、Codex 和 Google 翻译不要求登录积分账号。
 4. 推荐保留「自动」：未运行 SteamVR 时按 **Ctrl+Alt+T** 截取主屏；你自己启动 SteamVR 并连接成功后，长按左手柄 **X 1.5 秒**截图翻译。退出 SteamVR 会回到桌面。手动选择「桌面」会保持桌面，重新选「自动」才恢复跟随；任何模式都不会替你启动 SteamVR。
@@ -57,7 +57,7 @@
 
 ## 升级与增量更新
 
-升级到 `0.1.1-preview` 或后续版本时，先退出旧实例，再把新版压缩包完整解压到新目录并运行。设置保存在 `%LOCALAPPDATA%/SteamVrTranslator/`，不会因更换程序目录而被覆盖，无需复制旧目录中的程序文件或重新运行首次配置。
+升级前先退出翻译器。安装版直接运行新版安装程序，即可更新原安装目录。便携版请将新版 ZIP 完整解压到新目录，再运行其中的 `SteamVrTranslator.exe`。两种方式都会沿用 `%LOCALAPPDATA%/SteamVrTranslator/` 中的设置和已保存的密钥。
 
 从 Git 源码更新时，在现有仓库目录执行以下命令，再运行新生成的程序：
 

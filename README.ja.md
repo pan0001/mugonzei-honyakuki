@@ -8,7 +8,7 @@
 
 Windows デスクトップと SteamVR の画面から手書き・印刷文字を読み取り、画面や視界の下部に訳文を表示します。
 
-[Windows版をダウンロード](https://github.com/pan0001/mugonzei-honyakuki/releases) · [不具合を報告](https://github.com/pan0001/mugonzei-honyakuki/issues)
+[Windows x64 インストーラー · v0.2.5-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.5-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.5-preview.exe) · [ポータブル版 ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.5-preview/Mugonzei-Honyakuki-win-x64-v0.2.5-preview.zip) · [不具合を報告](https://github.com/pan0001/mugonzei-honyakuki/issues)
 
 **ワークスペースの表示例**
 
@@ -36,13 +36,13 @@ Windows デスクトップと SteamVR の画面から手書き・印刷文字を
 - Codexモード：インストール・ログイン済みのCodex CLI。オンラインのモデルを呼び出すため、オフライン推論ではありません。
 - その他のAI API：利用可能な互換サービス。画像の読み取りには画像入力への対応が必要で、AI手書きモードには複数画像の入力への対応も必要です。
 - 内蔵画面には [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/) が必要です。画面はインストール先のファイルから読み込みます。Google 翻訳を使うときはネット接続も必要です。
-- ポータブルパッケージには、.NETランタイム、Tesseractの言語モデル、ローカル日本語OCRのランタイムを同梱しています。ソースからのビルドには.NET 10 SDKが必要で、依存関係を初めて準備する際にはインターネット接続が必要です。
+- インストーラー版とポータブル版のどちらにも、.NET ランタイム、Tesseract の言語モデル、ローカル日本語 OCR のランタイムを同梱しています。ソースからのビルドには .NET 10 SDK が必要で、依存関係を初めて準備する際にはインターネット接続が必要です。
 
 現在、デスクトップUIは主に簡体字中国語です。このリポジトリでは中国語・日本語・英語の説明を提供しています。
 
 ## クイックスタート
 
-1. [公開済みの Windows ポータブル版](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.3-preview/Mugonzei-Honyakuki-win-x64-v0.2.3-preview.zip)をすべて展開し、`SteamVrTranslator.exe` を起動します。GitHub の `Source code` はソースのみです。以下は開発版の手順です。公開済み v0.2.3 の画面は異なります。
+1. Windows インストーラーを実行し、画面に従って現在のユーザー用にインストールします。スタートメニューから「Mugonzei Honyakuki」を起動してください。ポータブル版は、ZIP を書き込み可能なフォルダーにすべて展開してから `SteamVrTranslator.exe` を起動します。
 2. クレジットサービス、自分の API、本機の Codex、ローカル OCR＋Google 翻訳から選びます。
 3. クレジットサービスは専用画面でログインしてからモードを選択します。自分の API、Codex、Google 翻訳ではクレジットアカウントは不要です。
 4. 「自动」のとき、SteamVR を起動していなければ **Ctrl+Alt+T** でメイン画面を撮影できます。自分で SteamVR を起動して接続した後は左 **X を1.5秒**長押しして翻訳します。SteamVR を終了するとデスクトップに戻ります。手動の「桌面」は固定され、「自动」で自動切替に戻ります。翻訳機が SteamVR を起動することはありません。
@@ -57,7 +57,7 @@ Windows デスクトップと SteamVR の画面から手書き・印刷文字を
 
 ## アップグレードと差分更新
 
-`0.1.1-preview`以降へアップグレードする際は、先に旧バージョンを終了し、新版の圧縮ファイルを新しいフォルダーにすべて展開して実行してください。設定は`%LOCALAPPDATA%/SteamVrTranslator/`に保存されており、アプリのフォルダーを変えても上書きされません。旧フォルダーからプログラムファイルをコピーしたり、初回設定をやり直したりする必要はありません。
+更新前に翻訳機を終了してください。インストーラー版は、新しいインストーラーを実行すると元のインストール先で更新されます。ポータブル版は、新しい ZIP を別のフォルダーにすべて展開して `SteamVrTranslator.exe` を起動します。どちらも `%LOCALAPPDATA%/SteamVrTranslator/` に保存した設定とキーを引き継ぎます。
 
 Gitから取得したソースを更新する場合は、既存のリポジトリ内で次のコマンドを実行し、新しくビルドされたアプリを起動します。
 
