@@ -27,20 +27,39 @@ public sealed partial class Store
         """);
 
     private static ApiException UnavailableCode() => new(400, "redemption_unavailable", "兑换码无效、已被使用或已失效，请核对后重试。");
+
+    private static bool RandomShape(string value, string prefix) => value.Length == 34
+        && value.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)
+        && !value.AsSpan(2).ContainsAnyExcept("0123456789abcdefABCDEF");
+
+    private static string? CustomRedemptionText(string? code)
+    {
+        if (code is null || code.Length > 80) return null;
+        string text = code.Trim(' ');
+        if (text.StartsWith('-') || text.EndsWith('-') || text.Contains("--", StringComparison.Ordinal)
+            || text.StartsWith("MU-", StringComparison.OrdinalIgnoreCase) || text.StartsWith("MC-", StringComparison.OrdinalIgnoreCase))
+            return null;
+        var value = new StringBuilder(text.Length);
+        foreach (char c in text)
+        {
+            if (c == '-') continue;
+            if (!char.IsAsciiLetterOrDigit(c) && c is not (>= '\u3400' and <= '\u4dbf' or >= '\u4e00' and <= '\u9fff')) return null;
+            value.Append(char.ToUpperInvariant(c));
+        }
+        string compact = value.ToString();
+        return compact.Length is >= 4 and <= 40 && !RandomShape(compact, "MU") && !RandomShape(compact, "MC") ? compact : null;
+    }
+
+    // UTF-8 matches the original ASCII digests for every legacy MU code; equivalent
+    // ASCII coupon names also have the same digest, allowing atomic cross-type exclusion.
+    private static string RedemptionDigest(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value)));
+
     private static string CodeHash(string? code)
     {
         if (string.IsNullOrEmpty(code) || code.Length > 80) throw UnavailableCode();
-        var normalized = new StringBuilder(34);
-        foreach (char c in code)
-        {
-            if (c == '-' || char.IsWhiteSpace(c)) continue;
-            if (c > 127) throw UnavailableCode();
-            normalized.Append(char.ToUpperInvariant(c));
-        }
-        string value = normalized.ToString();
-        if (value.Length != 34 || !value.StartsWith("MU", StringComparison.Ordinal)
-            || value.AsSpan(2).ContainsAnyExcept("0123456789ABCDEF")) throw UnavailableCode();
-        return Convert.ToHexString(SHA256.HashData(Encoding.ASCII.GetBytes(value)));
+        string legacy = string.Concat(code.Where(c => c != '-' && !char.IsWhiteSpace(c)));
+        if (RandomShape(legacy, "MU")) return RedemptionDigest(legacy.ToUpperInvariant());
+        return RedemptionDigest(CustomRedemptionText(code) ?? throw UnavailableCode());
     }
 
     // The returned plaintext codes exist only here and in the administrator's protected export.
@@ -55,7 +74,7 @@ public sealed partial class Store
     }
 
     private static IReadOnlyList<GeneratedRedemptionCode> CreateRedemptionCodes(SqliteConnection db,
-        SqliteTransaction tx, int credits, int count, DateTimeOffset? expiresAt, string note)
+        SqliteTransaction tx, int credits, int count, DateTimeOffset? expiresAt, string note, string? customCode = null)
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
         if (credits is < 1 or > 1_000_000 || count is < 1 or > 1000 || note is null
@@ -63,21 +82,40 @@ public sealed partial class Store
             || expiresAt is { } expiry && (expiry <= now || expiry > now.AddYears(10)))
             throw new ApiException(400, "invalid_redemption_options", "积分须为 1–1000000，数量须为 1–1000；有效期须在未来十年内，备注最多 120 字且不得包含控制字符。");
         expiresAt = expiresAt?.ToUniversalTime();
+        string? customHash = null;
+        if (customCode is not null)
+        {
+            if (count != 1) throw new ApiException(400, "invalid_redemption_options", "自选口令每次只能生成一个兑换码。");
+            var value = CustomRedemptionText(customCode) ?? throw new ApiException(400, "invalid_redemption_code",
+                "自选口令需 4–40 个汉字、英文字母或数字，可用单个连字符分组。MU- 和 MC- 前缀及随机码格式为系统保留。");
+            customCode = customCode.Trim(' ');
+            customHash = RedemptionDigest(value);
+            using var used = Command(db, tx, """
+                SELECT 1 FROM redemption_codes WHERE code_hash=$hash
+                UNION ALL SELECT 1 FROM coupons WHERE code_hash=$hash LIMIT 1
+                """, ("$hash", customHash));
+            if (used.ExecuteScalar() != null) throw new ApiException(409, "redemption_code_exists", "这个口令已发放过，请使用其他口令。");
+        }
         var result = new List<GeneratedRedemptionCode>(count);
         for (int index = 0; index < count; index++)
         {
-            string random = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
-            string code = "MU-" + string.Join('-', Enumerable.Range(0, 8).Select(i => random.Substring(i * 4, 4)));
+            string code = customCode ?? RandomRedemptionCode();
             string id = Guid.NewGuid().ToString("N");
             Execute(db, tx, """
                 INSERT INTO redemption_codes(id,code_hash,credits,expires_at,created_at,note)
                 VALUES($id,$hash,$credits,$expiry,$created,$note)
-                """, ("$id", id), ("$hash", CodeHash(code)), ("$credits", credits),
+                """, ("$id", id), ("$hash", customHash ?? CodeHash(code)), ("$credits", credits),
                 ("$expiry", expiresAt?.ToString("O", CultureInfo.InvariantCulture)),
                 ("$created", now.ToString("O", CultureInfo.InvariantCulture)), ("$note", note.Trim()));
             result.Add(new(id, code, credits, expiresAt));
         }
         return result;
+    }
+
+    private static string RandomRedemptionCode()
+    {
+        string random = Convert.ToHexString(RandomNumberGenerator.GetBytes(16));
+        return "MU-" + string.Join('-', Enumerable.Range(0, 8).Select(i => random.Substring(i * 4, 4)));
     }
 
     private sealed record CodeRow(string Id, int Credits, DateTimeOffset? ExpiresAt, DateTimeOffset CreatedAt,

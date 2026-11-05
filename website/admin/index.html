@@ -45,6 +45,7 @@
           <label>生成数量<input id="count" type="number" min="1" max="50" step="1" value="1" required></label>
           <label>有效期（天）<input id="redemptionDays" type="number" min="1" max="365" step="1" value="30" required></label>
           <label>批次备注（选填）<input id="note" maxlength="120" type="text" placeholder="例如 活动名称"></label>
+          <label>自定义兑换口令（选填）<input id="redemptionCustomCode" type="text" maxlength="80" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="留空则随机生成"><small>仅限生成 1 张。可用 4–40 个汉字、英文字母或数字，可用短横线分组。每个口令只能兑换一次。</small></label>
         </div><button type="submit">核对批次</button></form>
       </section>
       <section class="card"><div class="row"><h2>兑换码记录</h2><button id="refreshRedemptions" type="button" class="light">刷新记录</button></div><div class="records" id="redemptionList"></div></section>

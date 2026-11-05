@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Mugonzei.Server;
 
@@ -94,6 +96,79 @@ internal static partial class Program
             Check(replay.Status == HttpStatusCode.Conflict && replay.Data.GetProperty("error").GetString() == "redemption_batch_exists"
                 && !replay.Data.TryGetProperty("codes", out _), "Restart and changed parameters cannot reuse a consumed request key");
             Equal(2, fixture.Store.ListRedemptionCodes().Count, "Restart retry issued no additional codes");
+        });
+        await CustomAdminRedemptions();
+    }
+
+    private static async Task CustomAdminRedemptions()
+    {
+        using var fixture = new Fixture();
+        var plan = new Plan("test-credits", "Fixture", 200, 500, new string('a', 32));
+        var plans = new[] { plan };
+        string operatorToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+        string user = fixture.User(), other = fixture.User();
+        string bearer = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+        fixture.Store.CreateSession(user, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(bearer))), DateTimeOffset.UtcNow.AddMinutes(10));
+        await AdminFixture.RunAsync(fixture.Path, plans, operatorToken, async http =>
+        {
+            using var login = await http.PostAsJsonAsync("admin/api/session", new { token = operatorToken });
+            login.EnsureSuccessStatusCode();
+            const string path = "admin/api/redemptions";
+            async Task<(HttpStatusCode Status, JsonElement Data)> Issue(string code, int count = 1, string? key = null)
+            {
+                using var request = new HttpRequestMessage(HttpMethod.Post, path)
+                    { Content = JsonContent.Create(new { credits = 17, count, days = 3, note = "fixture", customCode = code }) };
+                request.Headers.Add("Idempotency-Key", key ?? Guid.NewGuid().ToString("D"));
+                using var response = await http.SendAsync(request);
+                return (response.StatusCode, await response.Content.ReadFromJsonAsync<JsonElement>());
+            }
+            foreach (var code in new[] { "", "ABC", "A BC D", "AB--CD", "-ABCD", "ＡＢＣＤ", "test🙂", new string('字', 41),
+                "mu-random", "mc-coupon", "mU-" + new string('a', 32), "m-u" + new string('f', 32), "MC" + new string('2', 32) })
+                Equal(HttpStatusCode.BadRequest, (await Issue(code)).Status, "Invalid custom format cannot issue a code");
+            Equal(HttpStatusCode.BadRequest, (await Issue("Test-Valid", 2)).Status, "Named codes can only be issued singly");
+            string key = Guid.NewGuid().ToString("D");
+            var issued = await Issue("合成字样-17", key: key);
+            Equal(HttpStatusCode.Created, issued.Status, "Operator can issue a Chinese custom code");
+            Equal("合成字样-17", issued.Data.GetProperty("codes")[0].GetProperty("code").GetString(), "Only the successful creation response returns the printable phrase");
+            var repeat = await Issue("合成字样-17", key: key);
+            Check(repeat.Status == HttpStatusCode.Conflict && repeat.Data.GetProperty("error").GetString() == "redemption_batch_exists"
+                && !repeat.Data.TryGetProperty("codes", out _), "Named issuance cannot replay the plaintext");
+            using var buyer = new HttpClient { BaseAddress = http.BaseAddress };
+            buyer.DefaultRequestHeaders.Authorization = new("Bearer", bearer);
+            async Task<JsonElement> Redeem(string code)
+            {
+                using var response = await buyer.PostAsJsonAsync("v1/redemptions", new { code });
+                response.EnsureSuccessStatusCode();
+                return await response.Content.ReadFromJsonAsync<JsonElement>();
+            }
+            var first = await Redeem(" 合成字样17 ");
+            var retry = await Redeem("合成-字样-17");
+            Check(first.GetProperty("credits").GetInt32() == 17 && !first.GetProperty("alreadyRedeemed").GetBoolean()
+                && retry.GetProperty("alreadyRedeemed").GetBoolean() && retry.GetProperty("balance").GetInt64() == 17,
+                "The existing public redemption endpoint credits a named code once across grouping variants");
+            RedemptionThrows(400, "redemption_unavailable", () => fixture.Store.RedeemCode(other, "合成字样17"));
+            Equal(HttpStatusCode.Conflict, (await Issue("合成字样17")).Status, "Consumed custom text stays reserved");
+
+            var same = await Task.WhenAll(Issue("Stream-Test17"), Issue("streamtest17"));
+            Equal(1, same.Count(r => r.Status == HttpStatusCode.Created), "Concurrent requests cannot issue the same normalized text twice");
+            Equal("redemption_code_exists", same.Single(r => r.Status == HttpStatusCode.Conflict).Data.GetProperty("error").GetString(), "Name conflict is distinct from request replay");
+            var id = same.Single(r => r.Status == HttpStatusCode.Created).Data.GetProperty("codes")[0].GetProperty("id").GetString();
+            using var revoke = await http.PostAsJsonAsync(path + "/" + id + "/revoke", new { });
+            revoke.EnsureSuccessStatusCode();
+            Equal(HttpStatusCode.Conflict, (await Issue("STREAMTEST17")).Status, "Revoked phrases cannot be reissued");
+            RedemptionThrows(400, "redemption_unavailable", () => fixture.Store.RedeemCode(user, "streamtest17"));
+            RedemptionThrows(409, "coupon_exists", () => fixture.Store.CreateCoupon(plans, plan.Id, 300, new string('b', 32), customCode: "STREAMTEST17"));
+            var coupon = fixture.Store.CreateCoupon(plans, plan.Id, 300, new string('b', 32), customCode: "Fixture-Promo");
+            fixture.Store.RevokeCoupon(coupon.Id);
+            Equal(HttpStatusCode.Conflict, (await Issue("fixturepromo")).Status, "Coupon history also reserves a normalized name against direct credits");
+            RedemptionThrows(400, "redemption_unavailable", () => fixture.Store.RedeemCode(other, "Fixture-Promo"));
+            Equal(HttpStatusCode.Created, (await Issue("MugonzeiTest17")).Status, "An ordinary MU-prefixed word is valid outside the legacy shape");
+            var english = await Redeem("mugonzeitest17");
+            Equal(34L, english.GetProperty("balance").GetInt64(), "ASCII custom codes accept lowercase input through the public endpoint");
+            using var list = await http.GetAsync(path);
+            var metadata = await list.Content.ReadFromJsonAsync<JsonElement>();
+            Check(metadata.EnumerateArray().All(r => !r.TryGetProperty("code", out _) && !r.TryGetProperty("codeHash", out _)),
+                "Named codes and their hashes never appear in inventory responses");
         });
     }
 }

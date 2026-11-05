@@ -71,10 +71,10 @@
       <section class="panel redemption-panel" aria-labelledby="redemption-title">
         <div class="section-heading"><h3 id="redemption-title">兑换积分</h3><span class="muted">已有兑换码</span></div>
         <form id="redemption-form" class="redemption-form" method="post" action="/v1/redemptions" autocomplete="off">
-          <div class="form-row"><label for="redemption-code">兑换码</label><input id="redemption-code" name="code" type="text" autocomplete="off" autocapitalize="characters" spellcheck="false" required minlength="20" maxlength="80" placeholder="MU-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX-XXXX" aria-describedby="redemption-hint redemption-availability"></div>
+          <div class="form-row"><label for="redemption-code">兑换码或兑换口令</label><input id="redemption-code" name="code" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" required maxlength="80" placeholder="输入完整兑换码或口令" aria-describedby="redemption-hint redemption-availability"></div>
           <button id="redemption-submit" class="button button-primary" type="submit">兑换积分</button>
         </form>
-        <p class="form-hint" id="redemption-hint">粘贴完整兑换码；服务器会统一处理大小写、空格和短横线。每个兑换码只能到账一次，同一账户重试不会重复到账。</p>
+        <p class="form-hint" id="redemption-hint">支持 MU 随机码和运营者发放的中英文兑换口令。每个码只能兑换一次，同一账户重试不会重复到账。</p>
         <p class="form-hint" id="redemption-availability">没有充值方案时也可兑换。积分到账不代表托管 AI 已开放，翻译服务状态以客户端实际返回为准。</p>
         <p id="redemption-message" class="status-message" role="status" aria-label="兑换结果" aria-live="polite" aria-atomic="true" hidden></p>
       </section>

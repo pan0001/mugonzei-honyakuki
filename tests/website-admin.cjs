@@ -96,16 +96,29 @@ async function tests(){
   await click('redemptionTab');assert(content('redemptionList').includes('test <img>'));assert(!content('redemptionList').includes('SHOULD-NOT-RENDER'));
   const revoke=flatten($('redemptionList')).find(c=>c.tag==='button');revoke.listeners.click();
   assert.equal(posts('redemptions/'+redemption.id+'/revoke').length,0);await click('confirm');assert.equal(posts('redemptions/'+redemption.id+'/revoke').length,1);
+  $('credits').value='10';$('count').value='1';$('count').listeners.input();
+  for(const phrase of ['SampleEnglish','中文测试口令']){
+    $('redemptionCustomCode').value=phrase; await submit('redemptionForm');
+    assert(content('summary').includes('使用已填写的自定义口令')&&!content('summary').includes(phrase));
+    batchReply=()=>ok({codes:[{code:phrase}]},201); await click('confirm');
+    assert.equal(posts('redemptions').at(-1).body.customCode,phrase);
+    assert.equal($('codes').value,phrase);assert.equal($('redemptionCustomCode').value,'');
+    await click('dismissCodes');assert.equal($('codes').value,'');
+  }
+  $('redemptionCustomCode').value='SingleOnly';
+  $('count').value='2';$('count').listeners.input();
+  assert($('redemptionCustomCode').disabled && !$('redemptionCustomCode').value,'Batch selection clears and disables the single-code credential');
+  const singlePosts = posts('redemptions').length;
   $('credits').value='10';$('count').value='51';await submit('redemptionForm');assert(!$('review').open);
   $('count').value='2';$('note').value='QA';await submit('redemptionForm');
-  assert(content('summary').includes('20'));assert.equal(posts('redemptions').length,0);
+  assert(content('summary').includes('20') && content('summary').includes('随机生成'));assert.equal(posts('redemptions').length,singlePosts);
   batchReply=()=>Promise.reject(Error('lost'));await click('confirm');const lostKey=posts('redemptions').at(-1).key;
   batchReply=()=>ok({error:'redemption_batch_exists'},409);await click('confirm');assert.equal(posts('redemptions').at(-1).key,lostKey);
   assert($('issued').hidden && $('notice').textContent.includes('无法再次读取'));
   await submit('redemptionForm');
   batchReply=()=>ok({codes:[{code:'MU-ONE'},{code:'MU-TWO'}]},201);
   await click('confirm');assert.equal($('codes').value,'MU-ONE\nMU-TWO');
-  assert.deepEqual(posts('redemptions')[0].body,{credits:10,count:2,days:30,note:'QA'});assert.match(posts('redemptions')[0].key,/^[0-9a-f-]{36}$/);
+  assert.deepEqual(posts('redemptions').at(-1).body,{credits:10,count:2,days:30,note:'QA'});assert.match(posts('redemptions').at(-1).key,/^[0-9a-f-]{36}$/);
   await click('logout');assert($('workspace').hidden && !$('login').hidden);assert.equal($('codes').value,'');assert.equal($('note').value,'');
   summaryOffline=true;await login();assert.equal($('accounts').textContent,'—');assert(!$('reviewCoupon').disabled);
   summaryOffline=false;await click('refreshCoupons');assert.equal($('accounts').textContent,12);
@@ -150,6 +163,12 @@ async function browserTest() {
       assert.match(req.headers['idempotency-key'],/^[a-f0-9-]{36}$/);
       res.writeHead(201).end(JSON.stringify({...coupon,code:'SYNTHETIC-ONCE'}));return;
     }
+    if(req.method==='POST'&&route==='redemptions'){
+      assert.match(req.headers['idempotency-key'],/^[a-f0-9-]{36}$/);
+      const chunks=[];for await(const chunk of req)chunks.push(chunk);
+      const body=JSON.parse(Buffer.concat(chunks));assert.equal(body.count,1);assert.equal(body.customCode,'测试专用口令');
+      res.writeHead(201).end(JSON.stringify({codes:[{...redemption,code:body.customCode}]}));return;
+    }
     res.end(JSON.stringify(paths[route]));
   });
   let browser;
@@ -169,11 +188,16 @@ async function browserTest() {
       assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth && document.querySelector('dialog').getBoundingClientRect().right<=innerWidth));
       await page.locator('#confirm').click();await page.locator('#codes').waitFor();assert.equal(await page.locator('#codes').inputValue(),'SYNTHETIC-ONCE');
       await page.locator('#dismissCodes').click();await page.locator('#redemptionTab').click();await page.getByRole('button',{name:'撤销兑换码'}).waitFor();
+      await page.locator('#credits').fill('20');await page.locator('#redemptionCustomCode').fill('draft-phrase');await page.locator('#count').fill('2');
+      assert(await page.locator('#redemptionCustomCode').isDisabled());assert.equal(await page.locator('#redemptionCustomCode').inputValue(),'');
+      await page.locator('#count').fill('1');await page.locator('#redemptionCustomCode').fill('测试专用口令');
+      await page.getByRole('button',{name:'核对批次'}).click();assert(!(await page.locator('#summary').textContent()).includes('测试专用口令'));
+      await page.locator('#confirm').click();await page.locator('#codes').waitFor();assert.equal(await page.locator('#codes').inputValue(),'测试专用口令');
       assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
       await page.locator('#logout').click();await page.locator('#notice').filter({hasText:'已退出管理。'}).waitFor();
       await page.close();
     }
-    assert.equal(writes.length,9);
+    assert.equal(writes.length,12);
     console.log('PASS real Chromium login/create/logout same-origin headers and authenticated layouts at 320/390/1440px');
   }finally{await browser?.close();await new Promise(r=>server.close(r));}
 }

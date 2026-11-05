@@ -29,6 +29,7 @@
     epoch++; loggedIn = false; keys.clear(); latest.clear(); plans = [];
     closeReview(); clearIssued();
     for (const id of ['couponForm','redemptionForm','loginForm']) $(id).reset();
+    updateRedemptionCodeField();
     for (const id of ['plan','couponList','redemptionList','summary']) $(id).replaceChildren();
     for (const id of ['accounts','paidOrders','paidAmount']) $(id).textContent = '—';
     $('workspace').hidden = true; $('logout').hidden = true; $('login').hidden = false;
@@ -195,10 +196,18 @@
       throw Error('请检查自定义口令的格式。');
     return {planId:p.id, amountFen, afdianPlanId, days:whole('couponDays',1,365), ...(customCode ? {customCode} : {})};
   }
+  function updateRedemptionCodeField() {
+    const multiple = Number($('count').value) !== 1;
+    const field = $('redemptionCustomCode');
+    field.disabled = multiple;
+    if (multiple) field.value = '';
+  }
   function redemptionBody() {
     const note = $('note').value.trim();
     if (note.length > 120 || /[\x00-\x1f\x7f]/.test(note)) throw Error('备注最多 120 字，请移除控制字符。');
-    return {credits:whole('credits',1,1000000), count:whole('count',1,50), days:whole('redemptionDays',1,365), note};
+    const count = whole('count',1,50);
+    const customCode = count === 1 ? $('redemptionCustomCode').value.replace(/^ +| +$/g, '') : '';
+    return {credits:whole('credits',1,1000000), count, days:whole('redemptionDays',1,365), note, ...(customCode ? {customCode} : {})};
   }
   function showReview(operation, title, rows) {
     if (!loggedIn || review) return;
@@ -219,7 +228,7 @@
         const b = coupon ? couponBody() : redemptionBody();
         const plan = plans.find(p => p.id === b.planId);
         const rows = coupon ? [['套餐',plan.name + ' · ' + plan.credits + ' 积分'],['原价',money(plan.amountFen)],['折后价',money(b.amountFen)],['爱发电方案',b.afdianPlanId],['口令',b.customCode ? '使用已填写的口令' : '自动生成']]
-          : [['每码积分',b.credits],['生成数量',b.count],['积分合计',b.credits*b.count],['批次备注',b.note || '无']];
+          : [['每码积分',b.credits],['生成数量',b.count],['积分合计',b.credits*b.count],['口令',b.customCode ? '使用已填写的自定义口令' : '随机生成'],['批次备注',b.note || '无']];
         rows.push(['有效期',b.days + ' 天']);
         showReview({kind}, coupon ? '确认优惠活动' : '确认兑换码批次', rows);
       } catch (error) { notice(error.message,true); }
@@ -228,7 +237,8 @@
   const errors = {
     coupon_plan_conflict:'此爱发电方案已绑定其他价格或套餐，请更换独立折扣方案。', coupon_exists:'这个优惠口令已经发放过，请更换。',
     invalid_coupon:'活动配置无效，请检查折后价和爱发电方案。', coupon_unavailable:'自定义口令不可用，请更换。',
-    redemption_already_used:'该兑换码已被使用，无法撤销。', invalid_redemption_options:'请检查积分、数量、有效期和备注。'
+    redemption_already_used:'该兑换码已被使用，无法撤销。', invalid_redemption_options:'请检查积分、数量、有效期和备注。',
+    invalid_redemption_code:'自定义兑换口令不可用，请检查字符、长度或保留格式。', redemption_code_exists:'这个口令已发放或与已有口令冲突，请更换后再试。'
   };
   $('confirm').addEventListener('click', async () => {
     if (!loggedIn || !review || writing) return;
@@ -252,14 +262,14 @@
           throw new Fault(0,'invalid_reply');
         keys.delete(kind); $('codes').value = rows.map(r => r.code).join('\n');
         $('issuedTitle').textContent = coupon ? '优惠口令已创建' : '已生成 ' + rows.length + ' 个兑换码';
-        $('issued').hidden = false; $('customCode').value = ''; notice();
+        $('issued').hidden = false; $(coupon ? 'customCode' : 'redemptionCustomCode').value = ''; notice();
       }
       closeReview(); if (!id) $('issuedTitle').focus();
       await refresh(kind);
     } catch (error) {
       if (stamp !== epoch) return;
       if (['coupon_issue_exists','redemption_batch_exists'].includes(error.code)) {
-        closeReview(); keys.delete(kind); $('customCode').value = '';
+        closeReview(); keys.delete(kind); $(coupon ? 'customCode' : 'redemptionCustomCode').value = '';
         notice('服务器已处理这次创建，明文无法再次读取。请查看记录，必要时先停用对应记录。',true);
         await refresh(kind);
       } else {
@@ -280,6 +290,7 @@
   $('refreshCoupons').addEventListener('click', () => { if (loggedIn) return Promise.all([refresh('plans'),refresh('coupons'),refresh('summary')]); });
   $('refreshRedemptions').addEventListener('click', () => { if (loggedIn) return Promise.all([refresh('redemptions'),refresh('summary')]); });
   $('plan').addEventListener('change', describePlan);
+  $('count').addEventListener('input', updateRedemptionCodeField);
   window.addEventListener('pagehide', () => signOut());
   window.addEventListener('pageshow', event => { if (event.persisted) session(); });
   session();

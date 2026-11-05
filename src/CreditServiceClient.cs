@@ -145,17 +145,20 @@ public sealed class CreditServiceClient : IDisposable
     {
         token.ThrowIfCancellationRequested();
         if (string.IsNullOrWhiteSpace(code) || code.Length > 256)
-            throw new InvalidOperationException("请输入有效兑换码，格式为 MU 后接 8 组四位字母或数字。");
+            throw new InvalidOperationException("请输入完整兑换码或运营者发放的口令。");
         string compact = string.Concat(code.Where(c => !char.IsWhiteSpace(c) && c != '-')).ToUpperInvariant();
-        if (compact.Length != 34 || !compact.StartsWith("MU", StringComparison.Ordinal)
-            || compact.AsSpan(2).ContainsAnyExcept("0123456789ABCDEF"))
-            throw new InvalidOperationException("请输入有效兑换码，格式为 MU 后接 8 组四位十六进制字符。");
-        string normalized = "MU-" + string.Join("-", Enumerable.Range(0, 8).Select(i => compact.Substring(2 + i * 4, 4)));
+        // Keep accepting older MU codes pasted with extra whitespace. The server recognizes custom phrases.
+        string submitted = code.Trim(' ');
+        if (compact.Length == 34 && compact.StartsWith("MU", StringComparison.Ordinal)
+            && !compact.AsSpan(2).ContainsAnyExcept("0123456789ABCDEF"))
+            submitted = "MU-" + string.Join("-", Enumerable.Range(0, 8).Select(i => compact.Substring(2 + i * 4, 4)));
+        else if (submitted.Length > 80)
+            throw new InvalidOperationException("兑换码或口令最多 80 个字符。");
         CreditRedemptionResult result;
         try
         {
             // Codes only exist in this request; sessions and recent-task storage never receive them.
-            result = await SendAsync<CreditRedemptionResult>(HttpMethod.Post, "v1/redemptions", new { code = normalized }, RequireSession(), token).ConfigureAwait(false);
+            result = await SendAsync<CreditRedemptionResult>(HttpMethod.Post, "v1/redemptions", new { code = submitted }, RequireSession(), token).ConfigureAwait(false);
         }
         catch (CreditServiceException error) when (error.StatusCode == HttpStatusCode.BadRequest)
         { throw new CreditServiceException("兑换码不可用，请确认兑换码及有效期；本次未扣积分。", error.StatusCode); }

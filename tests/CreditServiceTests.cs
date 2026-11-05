@@ -232,11 +232,22 @@ public static class CreditServiceTests
                 "redemption amount and balance contract");
             var retry = await client.RedeemAsync(code.Replace("-", ""));
             Assert(retry.AlreadyRedeemed && retry.Reference == first.Reference, "same-code retry reports the prior redemption");
-            foreach (string invalid in new[] { "", "MU-1234", "MU-" + new string('G', 32), "MU-" + new string('\uff21', 32), new string('x', 257) })
+            foreach (string invalid in new[] { "", "  \t ", new string('x', 81), new string('x', 257) })
                 await ExpectAsync<InvalidOperationException>(() => client.RedeemAsync(invalid), "兑换码");
             using var cancelled = new CancellationTokenSource(); cancelled.Cancel();
             await ExpectAsync<OperationCanceledException>(() => client.RedeemAsync(code, cancelled.Token));
             Equal(2, requests, "invalid and already cancelled redemptions never send requests");
+        }
+        foreach (string custom in new[] { "SampleEnglish", "中文测试口令" })
+        {
+            using var client = Client(temp, async (request, token) =>
+            {
+                Equal("/base/v1/redemptions", request.RequestUri!.AbsolutePath, "custom phrases use the same redemption endpoint");
+                using var body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
+                Equal(custom, body.RootElement.GetProperty("code").GetString(), "custom phrase preserves its Unicode content and English case");
+                return Response(new { credits = 10, balance = 31L, reserved = 0L, alreadyRedeemed = false, reference = "fixture" });
+            });
+            await client.RedeemAsync(" " + custom + " ");
         }
         Equal(recent, temp.Store.Load(Endpoint)!.RecentTaskId, "redemption never replaces translation recovery state");
         Assert(Directory.GetFiles(temp.Path).Length == savedFiles.Count && savedFiles.All(pair => File.ReadAllBytes(pair.Key).AsSpan().SequenceEqual(pair.Value)),

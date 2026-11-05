@@ -107,6 +107,8 @@ To self-host, deploy the server separately and configure Afdian creator/develope
 
 Operators can use the developer panel to view account counts, paid orders and their totals, manage payment coupons, and issue credit redemption codes in batches. Configure an operator token on the updated server and open `/admin/`. [Setup and local demo](server/ADMIN.md)
 
+Operators can choose a custom code when issuing one credit voucher. Redeem it in the [website account center](https://mugonzei.top/account.html) to fund the same account on desktop. Desktop v0.2.6 users can claim custom codes on the website.
+
 See the [deployment guide](server/deploy/README.md) for initial Linux / systemd setup, SSH tunneling, and backups.
 
 ### Codex

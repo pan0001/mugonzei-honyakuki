@@ -78,6 +78,9 @@ public sealed partial class Store
         using var tx = db.BeginTransaction();
         if (issuanceRequestId is { } key && !ReserveAdminIssuance(db, tx, "coupon", key))
             throw new ApiException(409, "coupon_issue_exists", "该创建请求已处理，请查看活动列表。优惠码仅在首次创建时显示。");
+        using (var redemption = Command(db, tx, "SELECT 1 FROM redemption_codes WHERE code_hash=$hash", ("$hash", hash)))
+            if (redemption.ExecuteScalar() != null)
+                throw new ApiException(409, "coupon_exists", "这个口令已发放过，请使用其他口令。");
         RequireBaseProvider(db, tx, plan.AfdianPlanId);
         // Keep retired full-price provider IDs separate even after the operator removes their base plan.
         using (var wasBase = Command(db, tx, """

@@ -323,7 +323,7 @@ async function redemptionTests() {
     }
     return response({ ...reply, alreadyRedeemed: true });
   };
-  for (const invalid of ['x'.repeat(19), 'x'.repeat(81)]) {
+  for (const invalid of ['', ' \t ', 'x'.repeat(81)]) {
     element('redemption-code').value = invalid;
     await api.redeemCredits();
   }
@@ -343,6 +343,17 @@ async function redemptionTests() {
   check(element('redemption-message').textContent.includes('25') && element('redemption-message').textContent.includes('没有重复'), 'Already-redeemed result does not claim a second credit');
   check(walk(element('ledger-body')).some(node => node.textContent === '兑换码'), 'Redemption ledger entries have a recognizable label');
   check(!element('redemption-submit').disabled && element('plans').children.some(node => String(node.textContent).includes('暂未开放')), 'Redemption remains available without payment plans');
+
+  for (const custom of ['SampleEnglish','中文测试口令']) {
+    let submittedCustom;
+    transport = async (path, options) => {
+      if (path !== '/v1/redemptions') return read(path);
+      submittedCustom = JSON.parse(options.body); return response(reply);
+    };
+    element('redemption-code').value = ' ' + custom + ' '; await api.redeemCredits();
+    check(JSON.stringify(submittedCustom) === JSON.stringify({code:custom}) && !element('redemption-code').value,
+      'Short English and Chinese custom phrases reach the same protected redemption endpoint unchanged and clear on success');
+  }
 
   // A dashboard GET begun before redemption must finish before the post-credit refresh.
   let accountReads = 0;
@@ -406,6 +417,7 @@ async function redemptionTests() {
   check(api.getToken() === '' && element('redemption-code').value === '' && element('redemption-message').hidden, 'Expired session clears the code without a late redemption error replacing sign-in status');
   const html = fs.readFileSync(path.join(__dirname, '..', 'website', 'account.html'), 'utf8');
   check(html.includes('label for="redemption-code"') && /id="redemption-message"[^>]*role="status"[^>]*aria-live="polite"/.test(html), 'Redemption input and result have accessible labels/live status');
-  check(/id="redemption-code"[^>]*autocomplete="off"[^>]*minlength="20"[^>]*maxlength="80"/.test(html), 'Code input avoids autofill and matches the length contract');
+  const input = html.match(/<input id="redemption-code"[^>]*>/)[0];
+  check(input.includes('autocomplete="off"') && input.includes('maxlength="80"') && !/minlength|pattern=/.test(input), 'Web form permits short Unicode redemption phrases and avoids autofill');
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });

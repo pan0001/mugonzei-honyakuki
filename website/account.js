@@ -662,9 +662,9 @@
 
   async function redeemCredits() {
     if (!token || logoutBusy || redemptionBusy) return;
-    const code = $('redemption-code').value.trim();
-    if (code.length < 20 || code.length > 80) {
-      redemptionMessage('请输入 20–80 个字符的完整兑换码。', 'error');
+    const code = $('redemption-code').value.replace(/^ +| +$/g, '');
+    if (!code.trim() || code.length > 80) {
+      redemptionMessage('请输入完整兑换码或口令，最多 80 个字符。', 'error');
       $('redemption-code').focus();
       return;
     }

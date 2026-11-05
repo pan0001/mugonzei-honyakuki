@@ -48,7 +48,7 @@ public sealed class CreditAccountForm : Form
         email.AccessibleName = "注册邮箱"; verificationCode.AccessibleName = "邮箱验证码";
         verificationCode.PlaceholderText = "邮件中的 6 位数字"; verificationCode.MaxLength = 6;
         verificationCode.UseSystemPasswordChar = true;
-        redemptionCode.PlaceholderText = "MU- 后接 8 组四位字符；粘贴运营者提供的兑换码";
+        redemptionCode.PlaceholderText = "输入完整 MU 兑换码或运营者发放的兑换口令";
         redemptionCode.MaxLength = 128; redemptionCode.UseSystemPasswordChar = true;
         BuildUi();
         WindowChrome.Apply(this);
