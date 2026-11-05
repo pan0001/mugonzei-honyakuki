@@ -19,6 +19,9 @@ public sealed class CreditSessionStore
         lock (Gate) return LoadCore(endpoint);
     }
 
+    internal bool HasSavedSession(string serverUrl) =>
+        File.Exists(SessionPath(CreditServiceClient.NormalizeServerUrl(serverUrl)));
+
     internal CreditSession Save(string serverUrl, string token, string username, DateTimeOffset expiresAt, CancellationToken cancellation = default)
     {
         string endpoint = CreditServiceClient.NormalizeServerUrl(serverUrl);

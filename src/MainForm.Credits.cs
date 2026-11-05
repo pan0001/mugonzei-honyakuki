@@ -43,7 +43,8 @@ internal sealed partial class MainForm
             var draft = ReadSettingsDraft();
             if (loginOnly || string.IsNullOrEmpty(ReadWebAccountName()))
             {
-                using var login = new WebSetupForm(draft, _ => { }, firstRun: false, startAtLogin: true, loginOnly: true);
+                using var login = new WebSetupForm(draft, _ => { }, firstRun: false, startAtLogin: true,
+                    profileDirectory: web?.ProfileDirectory, loginOnly: true);
                 if (login.ShowDialog(this) != DialogResult.OK || loginOnly) return;
             }
             using var account = new WebCreditAccountForm(destination);

@@ -56,6 +56,7 @@
       <section id="workspace" class="page" aria-label="翻译工作台">
         <div class="capture-bar">
           <div class="capture-actions"><button type="button" class="primary" data-action="translate"><svg><use href="#i-scan"/></svg>截图并翻译</button><button type="button" id="cancelTask" data-action="cancel" title="当前没有可取消的任务" disabled>取消</button><button type="button" data-action="saveScreenshot" id="saveScreenshot" title="截取一张画面后即可保留" disabled><svg><use href="#i-save"/></svg>保留当前截图</button></div>
+          <button type="button" class="quiet" id="desktopCaptureEntry" aria-haspopup="dialog" aria-controls="quickDesktopCapture" hidden><svg aria-hidden="true"><use href="#i-monitor"/></svg><span id="desktopCaptureName">主显示器全屏</span></button>
         </div>
         <div class="workspace-grid">
           <section class="card media-card">
@@ -111,14 +112,20 @@
             <div role="tabpanel" id="creditsPanel" aria-labelledby="creditsTab" hidden>
               <section class="card form-card"><h2>积分账户</h2><p class="hint">完整翻译成功扣 1 积分。余额、充值、兑换和订单可在账户内查看。</p>
                 <button type="button" class="primary" data-action="account">打开积分服务</button><p class="hint" id="creditNote" hidden></p>
-                <details><summary>自定义积分服务地址</summary><label class="field">服务地址<input data-field="creditServerUrl" maxlength="2048" autocomplete="off" spellcheck="false"></label></details>
+                <details><summary id="creditDestination">官方积分服务</summary><label class="field">积分服务器地址<input data-field="creditServerUrl" maxlength="2048" autocomplete="off" spellcheck="false" required></label><button type="button" class="quiet" id="restoreOfficialCredit" hidden>使用官方地址</button></details>
               </section>
             </div>
           </section>
           <section id="capture" class="page settings" aria-label="截图与按键" hidden>
             <section class="card form-card"><h2>画面来源</h2><p class="hint" id="modeHelp"></p>
-              <div class="fields"><label class="field" id="vrSourceField">SteamVR 普通截图来源<select data-field="captureMode"><option>VR 左眼</option><option>桌面主显示器</option></select></label>
+              <div class="fields"><label class="field" id="desktopSourceField">桌面截图来源<select data-field="desktopCaptureSource"><option value="PrimaryMonitor">全屏（主显示器）</option><option value="Window">指定窗口</option></select></label>
+              <label class="field" id="vrSourceField">SteamVR 普通截图来源<select data-field="captureMode"><option>VR 左眼</option><option>桌面主显示器</option></select></label>
               <label class="field">本地 OCR 语言<input data-field="ocrLanguages" maxlength="128" placeholder="eng+jpn" spellcheck="false"></label></div>
+              <div id="desktopWindowPicker" hidden>
+                <div class="window-controls"><label class="field">截图窗口<select data-field="desktopWindowId" aria-describedby="desktopWindowStatus"><option value="">请选择窗口</option></select></label>
+                  <button type="button" id="refreshDesktopWindows">刷新窗口列表</button></div>
+                <p class="hint" id="desktopWindowStatus" role="status"></p>
+              </div>
               <p class="hint">识别区域，以画面左上角为起点。</p><div class="fields four">
                 <label class="field">左侧 %<input data-field="cropX" type="number" data-ratio min="0" max="99" step="1" required></label>
                 <label class="field">顶部 %<input data-field="cropY" type="number" data-ratio min="0" max="99" step="1" required></label>
@@ -151,6 +158,12 @@
       <div class="status-line"><span class="dot" aria-hidden="true"></span><span id="status" role="status">正在连接工作台…</span></div>
     </footer>
   </main>
+  <dialog class="source-dialog" id="quickDesktopCapture" aria-labelledby="quickDesktopTitle">
+    <h2 id="quickDesktopTitle">选择截图来源</h2>
+    <fieldset class="edit-area" id="quickDesktopFields"></fieldset>
+    <p class="feedback" role="status" id="quickDesktopError" hidden></p>
+    <div class="source-dialog-actions"><button type="button" id="cancelDesktopSource">取消</button><button type="button" class="primary" id="applyDesktopSource">应用</button></div>
+  </dialog>
   <section class="update-panel" id="updatePanel" popover="auto" role="dialog" aria-labelledby="updateTitle">
     <div class="update-head"><h2 id="updateTitle">客户端更新</h2><button type="button" class="quiet icon-button" id="updateClose" popovertarget="updatePanel" popovertargetaction="hide" aria-label="关闭更新面板"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div>
     <p id="updateCurrentVersion" class="update-version" hidden></p>

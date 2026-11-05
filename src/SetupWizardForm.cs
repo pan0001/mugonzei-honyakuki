@@ -21,7 +21,6 @@ internal sealed class SetupWizardForm : Form
     private readonly UiButton nextButton = Button("下一步", "wizardNext", true);
     private readonly UiButton backButton = Button("返回", "wizardBack");
     private readonly UiButton cancelButton = Button("取消", "wizardCancel");
-    internal const string OfficialCreditServerUrl = "https://api.mugonzei.top";
     private readonly SetupServiceChoice[] serviceChoices =
     [
         new() { Name = "wizardServiceCredits", Number = "01", Text = "账号积分服务（推荐）", Description = "登录一个账号即可开始 · 完整翻译成功扣 1 积分" },
@@ -64,7 +63,7 @@ internal sealed class SetupWizardForm : Form
         if (firstRun)
         {
             initial.TranslationBackend = "Credits";
-            initial.CreditServerUrl = OfficialCreditServerUrl;
+            initial.CreditServerUrl = AppSettings.OfficialCreditServerUrl;
             initial.ProcessingMode = "Handwriting";
         }
         this.saveSettings = saveSettings;
@@ -73,9 +72,9 @@ internal sealed class SetupWizardForm : Form
         bool validDestination = true;
         try { _ = CreditServiceClient.NormalizeServerUrl(initial.CreditServerUrl); }
         catch (Exception e) when (e is InvalidOperationException or ArgumentException) { validDestination = false; }
-        login = new CreditSetupLoginControl(validDestination ? initial.CreditServerUrl : OfficialCreditServerUrl, authenticate);
+        login = new CreditSetupLoginControl(validDestination ? initial.CreditServerUrl : AppSettings.OfficialCreditServerUrl, authenticate);
         login.Enabled = validDestination;
-        login.RegistrationAvailable = initial.CreditServerUrl.TrimEnd('/').Equals(OfficialCreditServerUrl, StringComparison.OrdinalIgnoreCase);
+        login.RegistrationAvailable = initial.CreditServerUrl.TrimEnd('/').Equals(AppSettings.OfficialCreditServerUrl, StringComparison.OrdinalIgnoreCase);
         login.RegisterRequested += (_, _) => {
             if (!login.RegistrationAvailable) return;
             try { System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("https://mugonzei.top/account.html#register-tab") { UseShellExecute = true }); }

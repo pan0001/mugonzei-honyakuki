@@ -67,6 +67,8 @@ h2 { font-size: 15px; font-weight: 650; letter-spacing: .025em; }
 .capture-bar, .card-head, .result-tools, .save-bar, .small-row { display: flex; align-items: center; gap: 10px; }
 .capture-bar, .card-head, .result-tools { justify-content: space-between; }
 .capture-bar { margin-bottom: 18px; flex-wrap: wrap; }
+#desktopCaptureEntry { min-width: 0; max-width: min(100%, 300px); }
+#desktopCaptureName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .capture-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
 .capture-actions button { min-height: 41px; }
 .workspace-grid { display: grid; grid-template-columns: minmax(0,1.03fr) minmax(0,1fr); align-items: start; gap: 16px; }
@@ -107,6 +109,13 @@ h2 { font-size: 15px; font-weight: 650; letter-spacing: .025em; }
 .form-card .card-head h2 { margin: 0; }
 .form-card .card-head button { min-height: 30px; font-size: 12px; }
 .fields { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 13px 20px; }
+.window-controls { display: flex; align-items: end; gap: 12px; flex-wrap: wrap; margin-top: 14px; }
+.window-controls .field { flex: 1 1 230px; min-width: 0; }
+.window-controls select { width: 100%; min-width: 0; text-overflow: ellipsis; }
+.source-dialog { width: min(490px,calc(100vw - 28px)); max-height: calc(100vh - 32px); padding: 22px; overflow: auto; background: var(--surface); color: var(--text); border: 1px solid #465b55; border-radius: var(--radius); box-shadow: 0 14px 40px #0006; }
+.source-dialog::backdrop { background: #07100fc2; }
+.source-dialog h2 { margin: 0 0 16px; }
+.source-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
 .fields.four { grid-template-columns: repeat(4,minmax(0,1fr)); }
 .fields.three { grid-template-columns: repeat(3,minmax(0,1fr)); }
 .field { display: grid; gap: 6px; min-width: 0; color: var(--muted); font-size: 13px; }

@@ -12,6 +12,12 @@ internal static class WebWorkspaceHostTests
         var next = WebSettingsPatch.Apply(existing, patch.RootElement);
         if (next.ApiKey != "" || existing.ApiKey.Length == 0 || WebSettingsPatch.Public(existing).ToJsonString().Contains(existing.ApiKey))
             throw new Exception("Workspace bridge leaked or reused an upstream key");
+        string windowId = Guid.NewGuid().ToString("N");
+        using var selection = JsonDocument.Parse(JsonSerializer.Serialize(new { desktopCaptureSource = "Window", desktopWindowId = windowId }));
+        var selected = WebSettingsPatch.Apply(existing, selection.RootElement);
+        if (selected.DesktopWindowId != windowId || (string?)WebSettingsPatch.Public(selected)["desktopWindowId"] != windowId
+            || JsonSerializer.Serialize(selected).Contains(windowId) || existing.DesktopCaptureSource != "PrimaryMonitor")
+            throw new Exception("The desktop source persists but the selected window belongs only to this session");
         string profile = Path.Combine(Path.GetTempPath(), "Mugonzei-Web-Test-" + Guid.NewGuid().ToString("N"));
         int before = SteamVrPresence.ReadServerPid();
         try
@@ -22,10 +28,14 @@ internal static class WebWorkspaceHostTests
                 var installer = new Uri("https://github.com/pan0001/mugonzei-honyakuki/releases/download/v90.0.0/Mugonzei-Honyakuki-Setup-win-x64-v90.0.0.exe");
                 var check = new TaskCompletionSource<GitHubUpdateResult>(TaskCreationOptions.RunContinuationsAsynchronously);
                 int requests = 0;
+                int windowRequests = 0;
+                bool selectable = true;
                 Uri? opened = null;
                 using var form = new MainForm(true, useWebUi: true, webProfileDirectory: profile,
                     checkForUpdates: ct => { requests++; return check.Task.WaitAsync(ct); },
                     openUpdateLink: uri => opened = uri) {
+                    ReadDesktopWindows = () => { Interlocked.Increment(ref windowRequests); return [new(windowId, "合成目标", "fixture")]; },
+                    IsDesktopWindowSelectable = id => selectable && id == windowId,
                     ShowInTaskbar = false, StartPosition = FormStartPosition.Manual,
                     Location = new Point(-15000, -15000), Size = new Size(1130, 760)
                 };
@@ -36,6 +46,22 @@ internal static class WebWorkspaceHostTests
                 Task<string> Js(string script) => core.ExecuteScriptAsync(script);
                 Task WaitJs(string script) => Until(async () => await Js(script) == "true");
                 await WaitJs("document.querySelector('#activeMode')?.textContent.includes('桌面') === true");
+                if (windowRequests != 0) throw new Exception("The workspace enumerated windows before the user selected window capture");
+                await Js("document.querySelector('#desktopCaptureEntry').click(); window.editWindowField=(key,value)=>{const field=document.querySelector('[data-field='+key+']');field.value=value;field.dispatchEvent(new Event('change'));};editWindowField('desktopCaptureSource','Window')");
+                await WaitJs("document.querySelector('[data-field=desktopWindowId]').options.length===2");
+                await Js("editWindowField('desktopWindowId','" + windowId + "')");
+                selectable = false;
+                await Js("document.querySelector('#applyDesktopSource').click()");
+                await WaitJs("document.querySelector('#quickDesktopError').textContent.includes('窗口')");
+                if (form.ReadSettingsDraft().DesktopCaptureSource != "PrimaryMonitor") throw new Exception("A closed window was saved");
+                selectable = true;
+                await Js("document.querySelector('#refreshDesktopWindows').click()");
+                await WaitJs("!document.querySelector('#refreshDesktopWindows').disabled");
+                await Js("document.querySelector('#applyDesktopSource').click()");
+                await WaitJs("!document.querySelector('#quickDesktopCapture').open && !document.querySelector('#workspace').hidden");
+                if (windowRequests != 2 || form.ReadSettingsDraft().DesktopWindowId != windowId)
+                    throw new Exception("The selected window did not round-trip through the workspace");
+                await Js("document.querySelector('[data-page=workspace]').click()");
                 if (requests != 0) throw new Exception("Update checks should only run on request");
                 await Js("document.querySelector('#updateEntry').click()");
                 await Until(() => Task.FromResult(requests == 1));
@@ -65,6 +91,16 @@ internal static class WebWorkspaceHostTests
                 if (!await denial.Task.WaitAsync(TimeSpan.FromSeconds(3))) throw new Exception("Navigation escaped the local workspace");
                 await Js("document.querySelector('input[name=mode][value=Auto]').click()");
                 await Until(() => Task.FromResult(form.ReadSettingsDraft().RuntimeMode == "Auto"));
+                // Exercise the real nested login window from a workspace WebMessageReceived callback.
+                // The owner and child share an isolated WebView2 profile and no credentials are entered.
+                await Js("window.chrome.webview.postMessage({type:'action',action:'login'})");
+                try
+                {
+                    await Until(async () => Application.OpenForms.OfType<WebSetupForm>().FirstOrDefault()?.Controls
+                        .OfType<LocalWebSurface>().SingleOrDefault()?.CoreForTests is { } loginCore
+                        && await loginCore.ExecuteScriptAsync("document.querySelector('#wizard')?.hidden === false && !document.querySelector('#account').hidden") == "true");
+                }
+                finally { Application.OpenForms.OfType<WebSetupForm>().FirstOrDefault()?.Close(); }
                 form.Close();
             });
             if (before == 0 && SteamVrPresence.ReadServerPid() != 0) throw new Exception("SteamVR appeared during a desktop-only smoke test");

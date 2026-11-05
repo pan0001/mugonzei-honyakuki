@@ -58,7 +58,7 @@ internal sealed class WebSetupFlow : IDisposable
     private readonly Action<DialogResult> close;
     private readonly Func<string, string, string, CancellationToken, Task<CreditSession>> authenticate;
     private readonly Func<string,CreditServiceClient> registrationService;
-    private const string Official = SetupWizardForm.OfficialCreditServerUrl;
+    private const string Official = AppSettings.OfficialCreditServerUrl;
     private readonly string? endpoint;
     private readonly bool firstRun;
     private readonly bool loginOnly;

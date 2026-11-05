@@ -8,7 +8,8 @@ namespace SteamVrTranslator;
 public sealed class AppSettings
 {
     public string TranslationBackend { get; set; } = "Codex";
-    public string CreditServerUrl { get; set; } = "http://127.0.0.1:5187";
+    internal const string OfficialCreditServerUrl = "https://api.mugonzei.top";
+    public string CreditServerUrl { get; set; } = OfficialCreditServerUrl;
     public string ProcessingMode { get; set; } = "Ocr";
     public string CodexExecutablePath { get; set; } = "";
     public string CodexModel { get; set; } = "";
@@ -30,6 +31,8 @@ public sealed class AppSettings
         set => runtimeMode = value ?? throw new JsonException("Invalid runtime mode.");
     }
     public string CaptureMode { get; set; } = "VR 左眼";
+    public string DesktopCaptureSource { get; set; } = "PrimaryMonitor";
+    [JsonIgnore] public string DesktopWindowId { get; set; } = "";
     public float CropX { get; set; } = 0;
     public float CropY { get; set; } = 0;
     public float CropWidth { get; set; } = 1;
@@ -67,6 +70,7 @@ public static class SettingsStore
         public int Version { get; set; } = 1;
         public AppSettings Settings { get; set; } = new();
         public string ProtectedApiKey { get; set; } = "";
+        public bool CustomCreditServer { get; set; }
     }
 
     // The optional directory is for isolated tests/portable tooling. The app uses LocalAppData.
@@ -81,6 +85,14 @@ public static class SettingsStore
             if (document.Version != 1 || document.Settings is null)
                 throw new JsonException("Unsupported settings.");
             ValidateShape(document.Settings);
+            // Old installations saved the development default even for users who never opened an account.
+            // Only migrate that exact default. A session file is evidence that this local service was used.
+            const string oldDefault = "http://127.0.0.1:5187";
+            if (!document.CustomCreditServer && document.Settings.CreditServerUrl.TrimEnd('/') == oldDefault)
+            {
+                var sessions = new CreditSessionStore(Path.Combine(directoryPath ?? DirectoryPath, "CreditSessions"));
+                if (!sessions.HasSavedSession(oldDefault)) document.Settings.CreditServerUrl = AppSettings.OfficialCreditServerUrl;
+            }
             if (!string.IsNullOrEmpty(document.ProtectedApiKey))
             {
                 byte[] clear = ProtectedData.Unprotect(Convert.FromBase64String(document.ProtectedApiKey),
@@ -102,7 +114,11 @@ public static class SettingsStore
         ValidateShape(settings);
         string directory = directoryPath ?? DirectoryPath;
         Directory.CreateDirectory(directory);
-        var document = new SettingsDocument { Settings = settings };
+        var document = new SettingsDocument
+        {
+            Settings = settings,
+            CustomCreditServer = !settings.CreditServerUrl.TrimEnd('/').Equals(AppSettings.OfficialCreditServerUrl, StringComparison.OrdinalIgnoreCase)
+        };
         if (!string.IsNullOrWhiteSpace(settings.ApiKey))
         {
             byte[] clear = Encoding.UTF8.GetBytes(settings.ApiKey.Trim());
@@ -134,6 +150,7 @@ public static class SettingsStore
         static bool Number(float value, float minimum, float maximum) => float.IsFinite(value)
             && value >= minimum && value <= maximum;
         if (settings.TranslationBackend is not ("Codex" or "OpenAI" or "GoogleTranslate" or "Credits")
+            || settings.DesktopCaptureSource is not ("PrimaryMonitor" or "Window")
             || !Text(settings.CreditServerUrl, 2048)
             || settings.ProcessingMode is not ("Ocr" or "Image" or "Handwriting" or "LocalJapanese")
             || settings.ApiImageDetail is not ("Default" or "High" or "Low" or "Auto")

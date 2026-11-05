@@ -91,7 +91,12 @@ internal sealed class LocalWebSurface : UserControl
                     var raw = e.WebMessageAsJson;
                     if (raw.Length > 64 * 1024) return;
                     using var doc = JsonDocument.Parse(raw, new JsonDocumentOptions { MaxDepth = 12 });
-                    if (doc.RootElement.ValueKind == JsonValueKind.Object) await receive(doc.RootElement.Clone());
+                    if (doc.RootElement.ValueKind != JsonValueKind.Object) return;
+                    var message = doc.RootElement.Clone();
+                    // A host command can open another WebView2 in a modal login window.
+                    // Dispatch on the next UI turn so both webviews can process callbacks.
+                    await Task.Yield();
+                    if (!IsDisposed && view == browser && IsEntry(core.Source)) await receive(message);
                 }
                 catch (JsonException) { Post(new { type = "error", message = "页面请求格式不正确。" }); }
                 catch (Exception) { Post(new { type = "error", message = "操作没有完成，请重试。" }); }
@@ -116,5 +121,6 @@ internal sealed class LocalWebSurface : UserControl
         try { core.PostWebMessageAsJson(JsonSerializer.Serialize(payload, Json)); }
         catch (InvalidOperationException) { /* window is closing */ }
     }
+    internal string ProfileDirectory => profile;
     internal CoreWebView2? CoreForTests => view?.CoreWebView2;
 }

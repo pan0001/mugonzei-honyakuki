@@ -10,8 +10,9 @@ internal static class WebSetupBrowserTests
         AppSettings? saved = null;
         int loginCalls = 0;
         using var form = new WebSetupForm(new AppSettings(), settings => saved = settings,
-            profileDirectory: profile, authenticate: (_, user, _, _) =>
+            profileDirectory: profile, authenticate: (server, user, _, _) =>
             {
+                if (server != "https://api.mugonzei.top/") throw new InvalidOperationException("First-run sign-in selected the wrong host");
                 loginCalls++;
                 return Task.FromResult(new CreditSession("synthetic", user, DateTimeOffset.UtcNow.AddMinutes(1), null));
             })
@@ -26,8 +27,12 @@ internal static class WebSetupBrowserTests
             Task Click(string elementId) => web.ExecuteScriptAsync($"document.getElementById('{elementId}').click()");
             Task Visible(string id) => WaitFor(async () =>
                 await web.ExecuteScriptAsync($"document.getElementById('{id}')?.hidden === false") == "true");
+            if (await web.ExecuteScriptAsync("document.querySelector('input[name=service]:checked')?.value === 'Credits'") != "true")
+                throw new InvalidOperationException("Official account service must be selected on a clean install");
             await Click("next");
             await Visible("account");
+            if (await web.ExecuteScriptAsync("document.getElementById('origin').hidden") != "true")
+                throw new InvalidOperationException("First-run account login must not display a custom server");
             if (await web.ExecuteScriptAsync("['providers','config','screen'].every(id=>document.getElementById(id).hidden)") != "true")
                 throw new InvalidOperationException("Other steps leaked into the sign-in page");
             await Click("register");

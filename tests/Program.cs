@@ -1,5 +1,10 @@
 using SteamVrTranslator;
 
+if (args.Length == 2 && args[0] == "--synthetic-window-fixture")
+{
+    WindowCaptureTests.RunFixture(args[1]);
+    return;
+}
 if (args.Length == 2 && args[0] == "--fake-codex")
 {
     await CodexTests.RunFakeAsync(args[1]);
@@ -13,6 +18,11 @@ if (args.Length == 2 && args[0] == "--fake-local-ocr")
 
 try
 {
+    if (args.Contains("--window-capture-smoke"))
+    {
+        await WindowCaptureTests.RunAsync();
+        return;
+    }
     if (args.Contains("--github-update-live"))
     {
         var live = await GitHubUpdateChecker.CheckAsync(CancellationToken.None);

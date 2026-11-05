@@ -158,6 +158,28 @@ public static class CreditIntegrationTests
             Check(loaded.TranslationBackend == "Codex" && loaded.ApiKey == original.ApiKey
                 && loaded.CreditServerUrl == new AppSettings().CreditServerUrl,
                 "Legacy version-1 settings without credit fields must load without resetting previous secrets");
+            const string official = "https://api.mugonzei.top";
+            const string loopback = "http://127.0.0.1:5187";
+            Check(loaded.CreditServerUrl == official && new AppSettings().CreditServerUrl == official,
+                "New installations and older settings without an account URL use the official account service");
+            document.AsObject().Remove("CustomCreditServer");
+            document["Settings"]!["CreditServerUrl"] = loopback;
+            File.WriteAllText(file, document.ToJsonString());
+            loaded = SettingsStore.Load(directory);
+            Check(loaded.CreditServerUrl == official && loaded.ApiKey == original.ApiKey && loaded.TranslationBackend == "Codex",
+                "An unused legacy loopback default migrates without disturbing the provider or its protected key");
+            loaded.CreditServerUrl = loopback;
+            SettingsStore.Save(loaded, directory);
+            Check(SettingsStore.Load(directory).CreditServerUrl == loopback, "An explicitly saved self-hosted account server survives a restart");
+            File.WriteAllText(file, document.ToJsonString());
+            var sessions = new CreditSessionStore(Path.Combine(directory, "CreditSessions"));
+            sessions.Save(loopback, "fixture-local-only-token", "fixture-user", DateTimeOffset.UtcNow.AddDays(-1));
+            Check(SettingsStore.Load(directory).CreditServerUrl == loopback && sessions.Load(official) is null,
+                "Prior local sign-in, even expired, preserves its destination and never transfers that session to the official host");
+            document["Settings"]!["CreditServerUrl"] = "http://127.0.0.1:8188/dev";
+            File.WriteAllText(file, document.ToJsonString());
+            Check(SettingsStore.Load(directory).CreditServerUrl == "http://127.0.0.1:8188/dev",
+                "Other self-hosted servers are preserved even without any session");
             foreach (string endpoint in new[] { "http://remote.invalid", "https://user:password@fixture.invalid", "https://fixture.invalid/?token=x" })
             {
                 loaded.TranslationBackend = "Credits"; loaded.CreditServerUrl = endpoint;

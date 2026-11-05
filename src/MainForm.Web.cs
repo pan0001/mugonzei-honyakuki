@@ -15,6 +15,37 @@ internal sealed partial class MainForm
     private CancellationTokenSource? updateCheck;
     private GitHubUpdateResult? checkedRelease;
     private string updateState = "idle", updateMessage = "";
+    internal Func<IReadOnlyList<DesktopWindowOption>> ReadDesktopWindows = WindowCaptureService.ListWindows;
+    internal Func<string, bool> IsDesktopWindowSelectable = WindowCaptureService.IsSelectable;
+    private HashSet<string> listedWindowIds = [];
+    private bool listingDesktopWindows;
+
+    private async Task ListWorkspaceWindows()
+    {
+        if (listingDesktopWindows) return;
+        listingDesktopWindows = true;
+        try
+        {
+            var windows = await Task.Run(ReadDesktopWindows);
+            if (closing) return;
+            listedWindowIds = windows.Select(window => window.Id).ToHashSet(StringComparer.Ordinal);
+            web?.Post(new { type = "desktopWindows", windows });
+        }
+        catch (Exception e) when (e is InvalidOperationException or System.ComponentModel.Win32Exception or UnauthorizedAccessException)
+        {
+            listedWindowIds.Clear();
+            if (!closing) web?.Post(new { type = "desktopWindows", error = true });
+        }
+        finally { listingDesktopWindows = false; }
+    }
+
+    private void ValidateWorkspaceWindow(AppSettings next)
+    {
+        if (next.DesktopCaptureSource != "Window" || (settings.DesktopCaptureSource == "Window"
+            && next.DesktopWindowId == settings.DesktopWindowId)) return;
+        if (!listedWindowIds.Contains(next.DesktopWindowId))
+            throw new InvalidOperationException("所选截图窗口已不可用。请还原窗口、刷新列表并重新选择。");
+    }
 
     private async Task CheckForUpdateAsync()
     {
@@ -168,8 +199,15 @@ internal sealed partial class MainForm
                     break;
                 case "save":
                     var next = WebSettingsPatch.Apply(settings, message.GetProperty("settings"));
+                    ValidateWorkspaceWindow(next);
+                    bool accountChanged = next.TranslationBackend == "Credits" &&
+                        (settings.TranslationBackend != "Credits" || next.CreditServerUrl != settings.CreditServerUrl);
                     SaveSettings(next); LoadSettings(); webDirty = false;
-                    web.Post(new { type = "saved", settings = WebSettingsPatch.Public(settings) }); SendAccountIdentity(); break;
+                    web.Post(new { type = "saved", settings = WebSettingsPatch.Public(settings) });
+                    if (!demo && accountChanged && Program.NeedsAccountSignIn(settings, new CreditSessionStore().Load))
+                        OpenAccountPage(loginOnly: true);
+                    SendAccountIdentity();
+                    break;
                 case "action":
                     string? action = message.GetProperty("action").GetString();
                     bool usingDraft = action is "testApi" or "testGoogle" or "checkCodex" or "account" or "setup" or "login";
@@ -179,6 +217,7 @@ internal sealed partial class MainForm
                     {
                         switch (action)
                         {
+                            case "listDesktopWindows": await ListWorkspaceWindows(); break;
                             case "translate": await CaptureAndTranslate(false); break;
                             case "recognize": await CaptureAndTranslate(true); break;
                             case "cancel": CancelAllWork(); break;

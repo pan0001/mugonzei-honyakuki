@@ -9,6 +9,8 @@ internal static class WebSettingsPatch
     {
         var result = JsonSerializer.SerializeToNode(settings, LocalWebSurface.Json)!.AsObject();
         result["hasApiKey"] = !string.IsNullOrEmpty(settings.ApiKey);
+        result["desktopWindowId"] = settings.DesktopWindowId;
+        result["officialCreditServerUrl"] = AppSettings.OfficialCreditServerUrl;
         return result;
     }
 
@@ -36,6 +38,17 @@ internal static class WebSettingsPatch
                 case "ocrLanguages": next.OcrLanguages = Text(item.Value); break;
                 case "hotkey": next.Hotkey = Text(item.Value); break;
                 case "captureMode": next.CaptureMode = Text(item.Value); break;
+                case "desktopCaptureSource":
+                    next.DesktopCaptureSource = Text(item.Value) switch
+                    {
+                        "Window" => "Window", "PrimaryMonitor" => "PrimaryMonitor", _ => throw Invalid()
+                    };
+                    break;
+                case "desktopWindowId":
+                    var id = Text(item.Value);
+                    if (id.Length != 0 && !Guid.TryParseExact(id, "N", out _)) throw Invalid();
+                    next.DesktopWindowId = id;
+                    break;
                 case "apiStream": next.ApiStream = Flag(item.Value); break;
                 case "controllerEnabled": next.ControllerEnabled = Flag(item.Value); break;
                 case "spatialSelectionEnabled": next.SpatialSelectionEnabled = Flag(item.Value); break;

@@ -22,7 +22,7 @@ const fixture = {
   appVersion: "0.2.5-preview", updateState: "idle", updateMessage: "", updateVersion: "",
   settings: {
     translationBackend: "OpenAI", processingMode: "Handwriting", targetLanguage: "简体中文",
-    creditServerUrl: "https://test.invalid", apiBaseUrl: "https://model.invalid/v1",
+    creditServerUrl: "https://test.invalid", officialCreditServerUrl: "https://api.mugonzei.top", apiBaseUrl: "https://model.invalid/v1",
     apiModel: "vision", apiStream: false, apiImageDetail: "Default", hasApiKey: true,
     codexExecutablePath: "", codexModel: "", codexReasoningEffort: "", ocrLanguages: "jpn+eng", hotkey: "Ctrl+Alt+T",
     cropX: 0, cropY: 0, cropWidth: 1, cropHeight: 1, captureMode: "VR 左眼",
@@ -153,10 +153,10 @@ async function main() {
     if (!ready) throw new Error("Workspace did not connect: " + JSON.stringify(await run("[location.href,document.title,typeof window.sent,typeof window.chrome?.webview,window.appErrors,document.querySelector('script')?.src]")) + " files=" + requests.join(","));
     await run("send(" + JSON.stringify(fixture) + ")");
     assert.equal(await run("el('activeMode').textContent"), "当前 · 桌面");
-    assert.deepEqual(await run("[...q('#workspace').querySelectorAll('button')].filter(e=>e.offsetWidth).map(e=>e.textContent.trim())"), ["截图并翻译","取消","保留当前截图"]);
+    assert.deepEqual(await run("[...q('#workspace').querySelectorAll('button')].filter(e=>e.offsetWidth).map(e=>e.textContent.trim())"), ["截图并翻译","取消","保留当前截图","截图来源 · 主显示器全屏"]);
     assert.deepEqual(await run("[...q('#workspace').querySelectorAll('h2')].map(e=>e.textContent)"), ["截图预览","翻译结果","识别原文"]);
     assert.deepEqual(await run("[el('cancelTask').disabled,el('saveScreenshot').disabled,el('pageTools').hidden]"), [true,true,true]);
-    assert.deepEqual(await run("[el('previewEmpty').offsetWidth>0,el('triggerKey').textContent,el('triggerHint').textContent,el('source').textContent]"), [true,"Ctrl+Alt+T","截取当前桌面","这里显示从截图中读到的文字。"]);
+    assert.deepEqual(await run("[el('previewEmpty').offsetWidth>0,el('triggerKey').textContent,el('triggerHint').textContent,el('source').textContent]"), [true,"Ctrl+Alt+T","截取主显示器全屏","这里显示从截图中读到的文字。"]);
     assert.ok(await run("el('cancelTask').title && el('saveScreenshot').title"), "Disabled capture actions explain when they become available");
     assert.equal(await run("sent.some(m=>['checkUpdate','downloadUpdate'].includes(m.action))"), false, "Opening the workspace does not check or download updates");
     await run("el('updateEntry').click()");
@@ -186,6 +186,32 @@ async function main() {
     assert.equal(await run("el('triggerKey').textContent"), "左 X");
     await run("send({type:'state',effectiveMode:'Desktop',settings:{hotkey:'F8'}})");
     assert.equal(await run("el('triggerKey').textContent"), "F8");
+    assert.equal(await run("sent.filter(m=>m.action==='listDesktopWindows').length"), 0, "Startup does not enumerate local windows");
+    await run("el('desktopCaptureEntry').click()");
+    assert.deepEqual(await run("[el('quickDesktopCapture').open,el('workspace').hidden,el('desktopWindowPicker').hidden,field('desktopCaptureSource').value]"),
+      [true,false,true,"PrimaryMonitor"]);
+    await run("edit('desktopCaptureSource','Window')");
+    assert.ok(await run("sent.some(m=>m.action==='listDesktopWindows') && el('refreshDesktopWindows').disabled"));
+    await run("send({type:'desktopWindows',windows:[]});el('applyDesktopSource').click()");
+    assert.ok(await run("el('desktopWindowStatus').textContent.includes('没有可选窗口') && el('quickDesktopError').textContent.includes('选择可用')"));
+    await viewport(375, 630);
+    assert.ok(await run("['quickDesktopCapture','refreshDesktopWindows','applyDesktopSource'].every(id=>{const r=el(id).getBoundingClientRect();return r.width>0&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight})"),
+      "The direct workspace source picker fits the narrow viewport");
+    await viewport(1150, 790);
+    await run("el('refreshDesktopWindows').click();send({type:'desktopWindows',error:true})");
+    assert.ok(await run("el('desktopWindowStatus').textContent.includes('重试') && !el('refreshDesktopWindows').disabled"));
+    await run("window.exampleWindow={id:'1'.repeat(32),title:'<img> 合成窗口',processName:'sample'};el('refreshDesktopWindows').click();send({type:'desktopWindows',windows:[exampleWindow]}); edit('desktopWindowId',exampleWindow.id);el('applyDesktopSource').click()");
+    assert.deepEqual(await run("sent.at(-1)"), {type:"save",settings:{desktopCaptureSource:"Window",desktopWindowId:"1".repeat(32)}});
+    assert.equal(await run("field('desktopWindowId').querySelector('img')"), null, "Window titles are rendered as plain text");
+    await run("send({type:'saved'})");
+    assert.ok(await run("!el('quickDesktopCapture').open && !el('workspace').hidden && el('triggerHint').textContent.includes('指定窗口')"));
+    await run("el('desktopCaptureEntry').click();send({type:'desktopWindows',windows:[]})");
+    assert.equal(await run("field('desktopWindowId').value"), "1".repeat(32), "A closed window cannot silently select an alternative");
+    await run("edit('desktopCaptureSource','PrimaryMonitor');el('cancelDesktopSource').click()");
+    assert.ok(await run("!el('quickDesktopCapture').open && el('triggerHint').textContent.includes('指定窗口') && el('saveBar').hidden"));
+    await run("showPage('capture');send({type:'desktopWindows',windows:[]});edit('desktopCaptureSource','PrimaryMonitor');el('save').click();send({type:'saved'});send({type:'state',mode:'SteamVR',effectiveMode:'SteamVR'})");
+    assert.ok(await run("el('desktopSourceField').hidden && !el('vrSourceField').hidden && el('desktopWindowPicker').hidden"));
+    await run("send({type:'state',mode:'Auto',effectiveMode:'Desktop'})");
     await run("showPage('services');");
     assert.equal(await run("el('pageTitle').textContent"), "账号与 AI 服务");
     assert.deepEqual(await run("[...document.querySelectorAll('[data-service-tab]')].map(e=>e.textContent)"), ["账号登录","偏好","积分服务"]);
@@ -195,7 +221,10 @@ async function main() {
     await run("send({type:'state',accountLoggedIn:true,accountUsername:'test-user'});el('creditsTab').click();q('[data-action=account]').click();");
     assert.deepEqual(await run("sent.at(-1)"), {type:"action",action:"account"});
     assert.equal(await run("el('accountName').textContent"), "test-user");
-    await run("el('prefsTab').click();window.originalSelect=field('translationBackend'); originalSelect.focus();");
+    assert.equal(await run("el('creditDestination').textContent"), "自定义积分服务");
+    await run("send({type:'state',settings:{creditServerUrl:'https://api.mugonzei.top/'}})");
+    assert.deepEqual(await run("[el('creditDestination').textContent,el('restoreOfficialCredit').hidden]"), ["官方积分服务",true]);
+    await run("el('prefsTab').click();window.dirtyAtPrefs=sent.filter(m=>m.type==='dirty'&&m.dirty).length;window.originalSelect=field('translationBackend'); originalSelect.focus();");
     const selectBox = await run("(()=>{const r=originalSelect.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()");
     await call("Input.dispatchMouseEvent", {type:"mousePressed",button:"left",clickCount:1,...selectBox});
     await call("Input.dispatchMouseEvent", {type:"mouseReleased",button:"left",clickCount:1,...selectBox});
@@ -208,7 +237,7 @@ async function main() {
     await call("Input.dispatchKeyEvent", {type:"keyDown", key:"Escape",code:"Escape",windowsVirtualKeyCode:27});
     await call("Input.dispatchKeyEvent", {type:"keyUp", key:"Escape",code:"Escape",windowsVirtualKeyCode:27});
     await run("edit('apiModel','draft'); edit('apiKey','synthetic-placeholder'); send({type:'state',settings:" + JSON.stringify(fixture.settings) + "})");
-    assert.deepEqual(await run("[field('apiModel').value,field('apiKey').value,sent.filter(m=>m.type==='dirty'&&m.dirty).length]"), ["draft","synthetic-placeholder",1]);
+    assert.deepEqual(await run("[field('apiModel').value,field('apiKey').value,sent.filter(m=>m.type==='dirty'&&m.dirty).length-dirtyAtPrefs]"), ["draft","synthetic-placeholder",1]);
     await run("el('updateEntry').click();el('updateCheck').click();el('updateClose').click()");
     assert.deepEqual(await run("sent.at(-1)"), {type:"action",action:"checkUpdate"}, "Checking an update never sends the settings draft");
     await run("send({type:'state',updateState:'current',updateVersion:'',updateMessage:''})");

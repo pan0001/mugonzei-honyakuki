@@ -9,6 +9,8 @@
     ["workspace", "翻译工作台"], ["services", "账号与 AI 服务"], ["capture", "截图与按键"], ["subtitles", "字幕显示"]
   ]);
   const saved = Object.create(null);
+  saved.desktopCaptureSource = "PrimaryMonitor";
+  saved.desktopWindowId = "";
   const edits = new Map();
   const state = {mode: "Auto", effectiveMode: "Desktop", pages: 0, page: 0, updateState: "idle"};
   const serviceTabs = all("[data-service-tab]");
@@ -20,6 +22,15 @@
   let lastPreview;
   let lastKeyOrigin = "";
   let pendingSave;
+  let windowListState = "idle";
+  let desktopWindows = new Map();
+  const quickCapture = byId("quickDesktopCapture");
+  const sourceControls = ["desktopSourceField", "desktopWindowPicker"].map(id => {
+    const control = byId(id);
+    const slot = document.createComment(id);
+    control.before(slot);
+    return {slot, control};
+  });
 
   function post(message) { if (host) host.postMessage(message); }
   function text(element, value) {
@@ -49,6 +60,7 @@
 
   function go(page) {
     if (!pages.has(page)) return;
+    const enteringCapture = page === "capture" && byId("capture").hidden;
     for (const id of pages.keys()) display(byId(id), id === page);
     for (const button of all("nav [data-page]")) {
       if (button.dataset.page === page) button.setAttribute("aria-current", "page");
@@ -57,6 +69,74 @@
     display(byId("settingsForm"), page !== "workspace");
     text(byId("pageTitle"), pages.get(page));
     byId("pageContent").scrollTop = 0;
+    if (enteringCapture && wantsWindowPicker()) requestDesktopWindows();
+  }
+  function wantsWindowPicker() {
+    return canConfigureDesktop() && current("desktopCaptureSource") === "Window";
+  }
+  function openDesktopSource() {
+    if (edits.size || saving) {
+      showStatus("请先保存或放弃当前设置修改，再切换截图来源。", true);
+      return;
+    }
+    for (const {control} of sourceControls) byId("quickDesktopFields").append(control);
+    optionalText("quickDesktopError", "");
+    quickCapture.showModal();
+    fields.get("desktopCaptureSource").focus();
+    if (wantsWindowPicker()) requestDesktopWindows();
+    dirtyInfo();
+  }
+  function closeDesktopSource() {
+    quickCapture.close();
+    for (const {slot, control} of sourceControls) slot.after(control);
+  }
+  function cancelDesktopSource() {
+    if (saving) return;
+    closeDesktopSource();
+    clearDraft({}, false);
+  }
+  function canConfigureDesktop() { return state.mode !== "SteamVR" || state.effectiveMode === "Desktop"; }
+  function requestDesktopWindows() {
+    if (windowListState === "loading") return;
+    windowListState = "loading";
+    renderWindowPicker();
+    post({type: "action", action: "listDesktopWindows"});
+  }
+  function receiveDesktopWindows(message) {
+    const options = fields.get("desktopWindowId");
+    options.options.length = 1;
+    desktopWindows = new Map();
+    windowListState = Array.isArray(message.windows) ? "ready" : "error";
+    for (const item of Array.isArray(message.windows) ? message.windows : []) {
+      if (!item || typeof item.id !== "string" || !item.id || typeof item.title !== "string") continue;
+      desktopWindows.set(item.id, item);
+      options.add(new Option(item.processName ? item.title + " · " + item.processName : item.title, item.id));
+    }
+    updateModes();
+  }
+  function renderWindowPicker() {
+    display(byId("desktopSourceField"), canConfigureDesktop());
+    display(byId("desktopWindowPicker"), wantsWindowPicker());
+    if (!wantsWindowPicker()) return;
+    const id = current("desktopWindowId");
+    const select = fields.get("desktopWindowId");
+    let missing = select.querySelector("[data-missing]");
+    if (missing && (missing.value !== id || desktopWindows.has(id))) { missing.remove(); missing = null; }
+    if (id && !desktopWindows.has(id) && !missing) {
+      missing = new Option("上次选择的窗口", id);
+      missing.dataset.missing = "";
+      missing.disabled = true;
+      select.add(missing);
+    }
+    write(select, id);
+    disabled(select, windowListState !== "ready" || !desktopWindows.size);
+    disabled(byId("refreshDesktopWindows"), windowListState === "loading");
+    const hint = windowListState === "loading" ? "正在读取窗口列表…"
+      : windowListState === "error" ? "未能读取窗口列表，请刷新重试。"
+      : windowListState === "ready" && !desktopWindows.size ? "没有可选窗口。请打开或还原目标窗口，然后刷新列表。"
+      : windowListState === "ready" && id && !desktopWindows.has(id) ? "上次选择的窗口已不可用。请还原后刷新，或选择其他窗口。"
+      : "请选择要截取的窗口。重新启动翻译器后需再次选择。";
+    text(byId("desktopWindowStatus"), hint);
   }
   function showServiceTab(id, focus = false) {
     for (const button of serviceTabs) {
@@ -92,6 +172,9 @@
     const dirty = edits.size > 0;
     display(byId("saveBar"), dirty);
     for (const id of ["save","discard","editArea","modes"]) disabled(byId(id), saving);
+    disabled(byId("quickDesktopFields"), saving);
+    disabled(byId("cancelDesktopSource"), saving);
+    disabled(byId("applyDesktopSource"), saving || !dirty);
     if (reportedDirty !== dirty) {
       reportedDirty = dirty;
       post({type: "dirty", dirty});
@@ -115,12 +198,18 @@
       if (!edits.has(field)) write(element, data[field]);
     }
     if (Object.hasOwn(data, "hasApiKey")) saved.hasApiKey = data.hasApiKey === true;
+    if (typeof data.officialCreditServerUrl === "string") saved.officialCreditServerUrl = data.officialCreditServerUrl;
     lastKeyOrigin = origin(current("apiBaseUrl"));
     renderForm();
   }
   function renderForm() {
     const provider = current("translationBackend");
     const recognition = current("processingMode");
+    if (saved.officialCreditServerUrl) {
+      const custom = String(current("creditServerUrl")).trim().replace(/\/+$/, "").toLowerCase() !== saved.officialCreditServerUrl;
+      text(byId("creditDestination"), custom ? "自定义积分服务" : "官方积分服务");
+      display(byId("restoreOfficialCredit"), custom);
+    }
     for (const group of all("[data-provider]")) display(group, group.dataset.provider === provider);
     for (const option of fields.get("processingMode").options) {
       disabled(option, provider === "GoogleTranslate" && ["Image", "Handwriting"].includes(option.value));
@@ -133,10 +222,12 @@
     text(byId("controllerHelp"), current("spatialSelectionEnabled")
       ? "按住左 X，用双手柄拉出矩形。松开后截图，译文留在原位。"
       : "长按左手柄 X 1.5 秒翻译，持续按到 3 秒取消。Index 使用左 A，Vive 使用右菜单键。");
+    renderWindowPicker();
     renderKey();
   }
   function edit(element) {
     if (saving) return;
+    if (quickCapture.open) optionalText("quickDesktopError", "");
     const field = element.dataset.field;
     let value = read(element);
     if (field === "apiKey") {
@@ -158,6 +249,10 @@
       changeField("processingMode", "Ocr");
       write(fields.get("processingMode"), "Ocr");
     }
+    if (field === "desktopCaptureSource") {
+      if (value === "Window") requestDesktopWindows();
+      else edits.delete("desktopWindowId");
+    }
     renderForm();
     dirtyInfo();
   }
@@ -167,6 +262,14 @@
   }
 
   function validate() {
+    if (current("desktopCaptureSource") === "Window" && (edits.has("desktopCaptureSource") || edits.has("desktopWindowId"))
+        && (windowListState !== "ready" || !desktopWindows.has(current("desktopWindowId")))) {
+      const message = "请刷新列表并选择可用的截图窗口。";
+      if (quickCapture.open) optionalText("quickDesktopError", message);
+      else { go("capture"); showStatus(message, true); }
+      fields.get("desktopWindowId").focus();
+      return false;
+    }
     for (const field of edits.keys()) {
       const element = fields.get(field);
       if (element.checkValidity()) continue;
@@ -220,13 +323,22 @@
     const selecting = hand && saved.spatialSelectionEnabled;
     text(byId("triggerVerb"), selecting ? "按住" : hand ? "长按" : "按");
     text(byId("triggerKey"), hand ? "左 X" : saved.hotkey || "Ctrl+Alt+T");
-    text(byId("triggerHint"), selecting ? "拉出选区，松开截图" : hand ? "1.5 秒截取画面" : effective === "桌面" ? "截取当前桌面" : "截图");
+    const windowCapture = saved.desktopCaptureSource === "Window";
+    text(byId("triggerHint"), selecting ? "拉出选区，松开截图" : hand ? "1.5 秒截取画面" : effective === "桌面" ? (windowCapture ? "截取指定窗口" : "截取主显示器全屏") : "截图");
+    display(byId("desktopCaptureEntry"), effective === "桌面");
+    const selectedWindow = desktopWindows.get(saved.desktopWindowId);
+    const sourceName = windowCapture ? selectedWindow?.title || (saved.desktopWindowId ? "指定窗口" : "") : "主显示器全屏";
+    const captureName = sourceName ? "截图来源 · " + sourceName : "选择截图窗口";
+    text(byId("desktopCaptureName"), captureName);
+    if (byId("desktopCaptureEntry").title !== captureName) byId("desktopCaptureEntry").title = captureName;
     if (byId("activeMode").title !== String(state.vrStatus || "")) byId("activeMode").title = String(state.vrStatus || "");
     text(byId("modeHelp"), state.mode === "Auto"
       ? "自动跟随 SteamVR。关闭时截取桌面，检测到就绪后切换到头显。"
       : state.mode === "Desktop" ? "手动使用桌面模式。选择「自动」即可恢复跟随 SteamVR。" : "优先使用 SteamVR。请先从 Steam 启动 SteamVR。");
     const canConfigureVr = state.mode !== "Desktop";
     for (const id of ["vrSourceField","vrFields","vrSubtitleFields"]) display(byId(id), canConfigureVr);
+    renderWindowPicker();
+    if (windowListState === "idle" && !byId("capture").hidden && wantsWindowPicker()) requestDesktopWindows();
     if (byId("modeHelp").title !== String(state.inputHelp || "")) byId("modeHelp").title = String(state.inputHelp || "");
   }
   function updatePresets(list) {
@@ -277,16 +389,19 @@
   function updateMessage(event) {
     const message = event.data;
     if (!message || typeof message !== "object") return;
+    if (message.type === "desktopWindows") { receiveDesktopWindows(message); return; }
     if (message.type === "error") {
       saving = false;
       requestedMode = undefined;
       pendingSave = undefined;
       dirtyInfo();
       if (message.message) showStatus(message.message, true);
+      if (quickCapture.open) optionalText("quickDesktopError", message.message || "截图来源未能保存。");
       updateModes();
       return;
     }
     if (message.type === "saved") {
+      if (quickCapture.open) closeDesktopSource();
       clearDraft(message.settings, true);
       showStatus("设置已保存。");
       updateModes();
@@ -352,6 +467,8 @@
   document.addEventListener("click", event => {
     const button = event.target.closest("button");
     if (!button || button.disabled) return;
+    if (button.id === "refreshDesktopWindows") { requestDesktopWindows(); return; }
+    if (button.id === "desktopCaptureEntry") { openDesktopSource(); return; }
     if (button.id === "updateEntry") {
       if (state.updateState === "idle" && !byId("updatePanel").matches(":popover-open")) requestUpdateCheck();
       return;
@@ -389,6 +506,9 @@
     });
   }
   byId("settingsForm").addEventListener("submit", event => { event.preventDefault(); sendSave(); });
+  quickCapture.addEventListener("cancel", event => { event.preventDefault(); cancelDesktopSource(); });
+  byId("cancelDesktopSource").addEventListener("click", cancelDesktopSource);
+  byId("applyDesktopSource").addEventListener("click", sendSave);
   byId("save").addEventListener("click", sendSave);
   byId("discard").addEventListener("click", () => clearDraft({}, false));
   byId("clearKey").addEventListener("click", () => {
@@ -397,6 +517,11 @@
     fields.get("apiKey").value = "";
     renderKey();
     dirtyInfo();
+  });
+  byId("restoreOfficialCredit").addEventListener("click", () => {
+    const address = fields.get("creditServerUrl");
+    write(address, saved.officialCreditServerUrl);
+    edit(address);
   });
   byId("apiPreset").addEventListener("change", event => {
     const item = presets[event.target.value];

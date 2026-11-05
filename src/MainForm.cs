@@ -46,6 +46,9 @@ internal sealed partial class MainForm : Form
     private readonly Button showGoogleBrowser = Button("查看翻译网页");
     private readonly Label googleTestResult = Note("");
     private readonly ComboBox captureMode = new UiComboBox() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 230 };
+    private readonly ComboBox desktopCaptureSource = new UiComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 230 };
+    private readonly ComboBox desktopWindow = new UiComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 310 };
+    private CancellationTokenSource? windowSnapshot;
     private readonly ComboBox workspaceMode = new UiComboBox() { Name = "workspaceMode", DropDownStyle = ComboBoxStyle.DropDownList, Width = 230 };
     private UiCard vrInputSettings = null!;
     private DesktopSubtitleForm? desktopSubtitle;
@@ -187,6 +190,10 @@ internal sealed partial class MainForm : Form
         target.Text = settings.TargetLanguage; languages.Text = settings.OcrLanguages; hotkeyText.Text = settings.Hotkey;
         workspaceMode.SelectedIndex = RuntimeModeIndex(settings.RuntimeMode);
         captureMode.SelectedItem = settings.CaptureMode; if (captureMode.SelectedIndex < 0) captureMode.SelectedIndex = 0;
+        desktopCaptureSource.SelectedIndex = settings.DesktopCaptureSource == "Window" ? 1 : 0;
+        desktopWindow.Items.Clear();
+        if (settings.DesktopWindowId.Length > 0)
+            desktopWindow.SelectedIndex = desktopWindow.Items.Add(new DesktopWindowOption(settings.DesktopWindowId, "已选择的应用窗口", "本次会话"));
         Put(cropX, settings.CropX * 100); Put(cropY, settings.CropY * 100); Put(cropW, settings.CropWidth * 100); Put(cropH, settings.CropHeight * 100);
         Put(overlayWidth, settings.OverlayWidth); Put(overlayDistance, settings.OverlayDistance); Put(overlayY, settings.OverlayVerticalOffset); Put(duration, settings.DisplaySeconds);
         controller.Checked = settings.ControllerEnabled; showSource.Checked = settings.ShowSource;
@@ -407,6 +414,8 @@ internal sealed partial class MainForm : Form
             TargetLanguage = target.Text.Trim(), OcrLanguages = languages.Text.Trim(), Hotkey = hotkeyText.Text.Trim(),
             RuntimeMode = workspaceMode.SelectedIndex switch { 0 => "SteamVR", 1 => "Desktop", _ => "Auto" },
             DesktopMode = workspaceMode.SelectedIndex == 1, CaptureMode = captureMode.Text,
+            DesktopCaptureSource = desktopCaptureSource.SelectedIndex == 1 ? "Window" : "PrimaryMonitor",
+            DesktopWindowId = (desktopWindow.SelectedItem as DesktopWindowOption)?.Id ?? settings.DesktopWindowId,
             CropX = (float)cropX.Value / 100, CropY = (float)cropY.Value / 100,
             CropWidth = (float)cropW.Value / 100, CropHeight = (float)cropH.Value / 100,
             OverlayWidth = (float)overlayWidth.Value, OverlayDistance = (float)overlayDistance.Value,
@@ -419,7 +428,11 @@ internal sealed partial class MainForm : Form
 
     private void SaveSettings(AppSettings changed)
     {
-        if (busy) throw new InvalidOperationException("请等待本次翻译完成或先取消，再保存设置。");
+        if (busy || windowSnapshot != null) throw new InvalidOperationException("请等待本次翻译完成或先取消，再保存设置。");
+        if (changed.DesktopCaptureSource == "Window" &&
+            (changed.DesktopCaptureSource != settings.DesktopCaptureSource || changed.DesktopWindowId != settings.DesktopWindowId)
+            && !IsDesktopWindowSelectable(changed.DesktopWindowId))
+            throw new InvalidOperationException("所选截图窗口已不可用，请刷新并选择窗口。");
         if (apiVisionCheck is not null) throw new InvalidOperationException("请等待图片测试完成或取消，再保存设置。");
         if (googleTranslationCheck is not null) throw new InvalidOperationException("请等待谷歌翻译测试完成或取消，再保存设置。");
         SettingsValidation.ValidateForSave(changed);
@@ -433,7 +446,7 @@ internal sealed partial class MainForm : Form
             try { hotkeys?.Register(Hotkeys.Translate, settings.Hotkey); } catch { }
             throw;
         }
-        bool modeChanged = settings.RuntimeMode != changed.RuntimeMode;
+        bool modeChanged = settings.RuntimeMode != changed.RuntimeMode || settings.DesktopCaptureSource != changed.DesktopCaptureSource;
         settings = changed;
         string? runtimeWarning = null;
         try
@@ -458,7 +471,7 @@ internal sealed partial class MainForm : Form
     private void OpenSetupWizard()
     {
         if (closing || setupDialogOpen) return;
-        if (busy || selectionActive || selectionCapture is not null || loginCheck is not null
+        if (busy || windowSnapshot != null || selectionActive || selectionCapture is not null || loginCheck is not null
             || apiVisionCheck is not null || googleTranslationCheck is not null)
             throw new InvalidOperationException("请先完成或取消当前任务，再打开配置向导。");
         bool resumePolling = pollTimer.Enabled;
@@ -503,10 +516,21 @@ internal sealed partial class MainForm : Form
         if (selection is null) CancelSelectionCapture();
         else if (!vr.IsAnchorValid(selection.Anchor)) { SetStatus("框选位置已失效，请重新拉框。"); return; }
         Bitmap? desktopImage = null;
+        RequestCancellation(windowSnapshot);
         if (ActiveDesktopMode)
         {
             // Snapshot at the keypress. An earlier OCR/API call may still be winding down.
-            try { HideOverlay(); desktopImage = CaptureService.CaptureDesktop(Handle, settings); }
+            try
+            {
+                HideOverlay();
+                if (settings.DesktopCaptureSource == "Window")
+                {
+                    desktopImage = await TakeWindowSnapshotAsync();
+                    if (desktopImage == null) return;
+                    source += " · 应用窗口";
+                }
+                else desktopImage = CaptureService.CaptureDesktop(Handle, settings);
+            }
             catch (Exception error) { ReportCaptureFailure(error, CancellationToken.None); return; }
         }
         var next = new CaptureRequest(ocrOnly, source, gestureId, selection, desktopImage, desktopImage is null ? null : DateTime.Now);
@@ -688,7 +712,7 @@ internal sealed partial class MainForm : Form
             : "1.5 秒：第一圈完成，截屏并翻译。\n3 秒：第二圈完成，取消本次并隐藏字幕。松开后可再次触发。";
         if (ActiveDesktopMode)
         {
-            workspaceInputHelp.Text = $"桌面模式     按 {settings.Hotkey} 截取主显示器并翻译\n译文显示在桌面下方 · Ctrl + Alt + H 显示或隐藏字幕";
+            workspaceInputHelp.Text = $"桌面模式     按 {settings.Hotkey} 截取{DesktopSourceLabel}并翻译\n译文显示在桌面下方 · Ctrl + Alt + H 显示或隐藏字幕";
             sidebarInputHelp.Text = "桌面翻译 · " + settings.Hotkey;
             return;
         }
@@ -698,7 +722,34 @@ internal sealed partial class MainForm : Form
         sidebarInputHelp.Text = settings.SpatialSelectionEnabled ? "左 X · 按住双手柄拉框\n松开翻译，固定原位" : "左 X  ·  长按 1.5 秒翻译";
     }
 
-    private void UpdateCancelButton() => cancelButton.Enabled = busy || selectionActive || selectionCapture is not null || pagesAnchor is not null;
+    private async Task<Bitmap?> TakeWindowSnapshotAsync()
+    {
+        using var attempt = new CancellationTokenSource();
+        windowSnapshot = attempt;
+        UpdateCancelButton();
+        SetStatus("正在截取所选应用窗口…");
+        try
+        {
+            var image = await WindowCaptureService.CaptureAsync(settings, attempt.Token);
+            if (!closing && !attempt.IsCancellationRequested && ActiveDesktopMode) return image;
+            image.Dispose();
+            return null;
+        }
+        catch (Exception) when (closing || attempt.IsCancellationRequested || !ActiveDesktopMode) { return null; }
+        finally
+        {
+            if (ReferenceEquals(windowSnapshot, attempt))
+            {
+                windowSnapshot = null;
+                if (!closing) UpdateCancelButton();
+                else if (!busy && selectionCapture == null) Close();
+            }
+        }
+    }
+
+    private string DesktopSourceLabel => settings.DesktopCaptureSource == "Window" ? "所选应用窗口" : "主显示器";
+
+    private void UpdateCancelButton() => cancelButton.Enabled = busy || windowSnapshot != null || selectionActive || selectionCapture is not null || pagesAnchor is not null;
 
     private void ClearPages()
     {
@@ -719,6 +770,7 @@ internal sealed partial class MainForm : Form
 
     private void CancelAllWork()
     {
+        RequestCancellation(windowSnapshot);
         captureRequests.CancelPending(); RequestCancellation(currentRequest);
         CancelSelectionCapture(); ClearPages();
         TryAction(HideOverlay); TryAction(HideHoldOverlay);
@@ -899,6 +951,7 @@ internal sealed partial class MainForm : Form
         displayedDesktop = desktop;
         if (switched)
         {
+            RequestCancellation(windowSnapshot);
             desktopSubtitle?.Hide();
             overlayVisible = holdOverlayVisible = false;
             overlayGestureId = 0;
@@ -910,7 +963,7 @@ internal sealed partial class MainForm : Form
         reconnect.Visible = settings.RuntimeMode != "Desktop";
         vrStatus.Text = desktop ? settings.RuntimeMode switch
         {
-            "Desktop" => "桌面模式 · 主显示器",
+            "Desktop" => "桌面模式 · " + DesktopSourceLabel,
             "SteamVR" => "桌面模式 · 等待 SteamVR 就绪",
             _ => "桌面模式 · 自动检测 SteamVR"
         } : vr.Status;
@@ -1102,11 +1155,12 @@ internal sealed partial class MainForm : Form
 
     private void OnClosing(object? sender, FormClosingEventArgs e)
     {
+        RequestCancellation(windowSnapshot);
         closing = true; RequestCancellation(updateCheck); RequestCancellation(loginCheck); RequestCancellation(apiVisionCheck); RequestCancellation(googleTranslationCheck); pollTimer.Stop(); hotkeys?.Dispose(); tray.Visible = false;
         bool capturingSelection = selectionCapture is not null;
         CancelSelectionCapture();
         captureRequests.CancelPending();
-        if (busy || capturingSelection)
+        if (busy || capturingSelection || windowSnapshot != null)
         {
             e.Cancel = true; RequestCancellation(currentRequest); Hide(); return;
         }
