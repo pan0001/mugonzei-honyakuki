@@ -52,8 +52,24 @@ internal static class GameTextFilter
             if (!string.IsNullOrWhiteSpace(raw[i])) lines.Add(new(i, raw[i]));
 
         var visible = lines;
+        // A deliberately nested HUD can reveal only one new pair each pass. Limit the total
+        // number of line visits, including when Clean runs on the desktop UI thread.
+        long remainingRows = 4L * lines.Count;
         while (visible.Count > 0)
         {
+            if (visible.Count > remainingRows)
+            {
+                RemoveInterleavedTelemetry(visible);
+                var retained = visible.Where(row => !row.Removed).ToList();
+                if (retained.Count == visible.Count) return text;
+                // Return a partial cleanup only if it is already stable. Otherwise preserve the
+                // original, including ambiguous dialogue, on every retry.
+                RemoveInterface(retained);
+                RemoveRepeatedBlocks(retained);
+                if (retained.Any(row => row.Removed)) return text;
+                break;
+            }
+            remainingRows -= visible.Count;
             RemoveInterface(visible);
             RemoveRepeatedBlocks(visible);
             if (!visible.Any(row => row.Removed)) break;
@@ -141,6 +157,36 @@ internal static class GameTextFilter
             while (i < lines.Count && IsMetricLine(lines[i].Label, out bool strong)) { hasTelemetry |= strong; i++; }
             if (hasTelemetry || i - start >= 2)
                 for (int j = start; j < i; j++) lines[j].IsHud = lines[j].Removed = true;
+            if (i == start) i++;
+        }
+    }
+
+    // At the pass limit, classify a dense performance panel as a single run. Require several
+    // measured rows plus explicit multi-key legends including push-to-talk. A name, a single
+    // key or any prose ends the run and remains eligible for display.
+    private static void RemoveInterleavedTelemetry(List<Line> lines)
+    {
+        int i = 0;
+        while (i < lines.Count)
+        {
+            int start = i, metrics = 0, legends = 0;
+            bool pushToTalk = false;
+            while (i < lines.Count)
+            {
+                string label = lines[i].Label;
+                if (IsMetricLine(label, out _)) metrics++;
+                else
+                {
+                    if (label.Length > 80) break;
+                    var keys = KeySeparator.Split(label).Where(k => k.Length > 0).ToArray();
+                    if (keys.Length < 2 || !keys.All(k => k.Length > 1 && Key.IsMatch(k))) break;
+                    legends++;
+                    pushToTalk |= keys.Contains("PTT", StringComparer.OrdinalIgnoreCase);
+                }
+                i++;
+            }
+            if (metrics >= 3 && legends >= 3 && pushToTalk)
+                for (int j = start; j < i; j++) lines[j].Removed = true;
             if (i == start) i++;
         }
     }

@@ -72,7 +72,24 @@ internal static class GameTextFilterTests
         Expect(string.Join('\n', first, second, second, first, second), first + "\n" + second);
         Expect("Esc\nFPS 90 | GPU 12 %\nTab\nFPS 90 | GPU 12 %\nF4", "");
         Expect("VRChat\n已连接\n已连接。\n输入文字并发送 OSC 翻译\n发送翻译\niwaSync3 V2", "");
+        string panel = NestedPanel(250);
+        Expect(panel, "");
+        Expect(panel + "\nThe bell rings twice at dawn.\n" + panel, "The bell rings twice at dawn.");
+        // Without the explicit PTT signature these nested layout rows could be a keyboard guide.
+        // Exceeding the scan budget must deterministically return the original on every retry.
+        string ambiguous = panel.Replace("PTT F4", "Ctrl F4");
+        Expect(ambiguous, ambiguous);
         Console.WriteLine("PASS conservative screenshot UI filtering and repeated captions across Chinese, Japanese and English");
+    }
+
+    private static string NestedPanel(int layers)
+    {
+        var rows = new List<string>();
+        for (int i = 1; i <= layers; i++) { rows.Add($"FPS {i}"); rows.Add("Esc Tab"); }
+        rows.Add("FPS 411");
+        rows.Add("GPU 458");
+        for (int i = 1; i <= layers; i++) { rows.Add("PTT F4"); rows.Add($"GPU {i}"); }
+        return string.Join('\n', rows);
     }
 
     private static void Expect(string input, string expected)
