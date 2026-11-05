@@ -102,7 +102,7 @@ internal static class UiPreview
             var flags = TextFormatFlags.HorizontalCenter | TextFormatFlags.NoPrefix
                 | TextFormatFlags.WordBreak | TextFormatFlags.PreserveGraphicsClipping;
             const string heading = "等待下一张截图";
-            const string detail = "使用已设置的手柄操作，或点击上方按钮";
+            const string detail = "按截图快捷键，或点击「截屏并翻译」";
             int headingHeight = TextRenderer.MeasureText(graphics, heading, headingFont,
                 new Size(textWidth, 1000), flags).Height;
             int detailHeight = TextRenderer.MeasureText(graphics, detail, detailFont,

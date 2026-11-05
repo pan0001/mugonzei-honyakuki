@@ -234,7 +234,7 @@ public static class DesktopResponsivenessTests
     private static void Set(object target, string name, object value) => target.GetType().GetField(name, BindingFlags.Instance | BindingFlags.NonPublic)!.SetValue(target, value);
     private static void Check(bool value, string message) { if (!value) throw new Exception(message); }
 
-    private static Task OnUiThread(Func<Task> test)
+    internal static Task OnUiThread(Func<Task> test)
     {
         var complete = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var thread = new Thread(() =>

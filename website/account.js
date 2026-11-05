@@ -589,6 +589,7 @@
     }
   });
 
+  if (globalThis.location?.hash === '#register-tab') setMode('register');
   api('/plans', { authenticated: false }).then(rows => {
     if (!Array.isArray(rows)) throw new ApiError('无法读取充值方案。');
     plans = rows; updatePlanStatus(rows);

@@ -71,12 +71,32 @@ internal static class Program
             return;
         }
         bool demo = args.Contains("--demo");
-        if (!demo && SettingsStore.NeedsInitialSetup())
+        if (!demo)
         {
-            // Create no VR, hotkey or translation services until setup is saved.
-            using var setup = new SetupWizardForm(new AppSettings(), settings => SettingsStore.Save(settings));
-            if (setup.ShowDialog() != DialogResult.OK) return;
+            bool firstRun = SettingsStore.NeedsInitialSetup();
+            AppSettings? existing = null;
+            if (!firstRun)
+            {
+                try { existing = SettingsStore.Load(); }
+                catch (InvalidOperationException) { /* MainForm can display and recover damaged settings. */ }
+            }
+            bool signIn = existing is not null && NeedsAccountSignIn(existing, new CreditSessionStore().Load);
+            bool configure = args.Contains("--setup");
+            if (firstRun || signIn || configure)
+            {
+                using var setup = new SetupWizardForm(existing ?? new AppSettings(), settings => SettingsStore.Save(settings),
+                    firstRun: firstRun, startAtLogin: signIn && !configure)
+                    { StartPosition = FormStartPosition.CenterScreen, ShowInTaskbar = true };
+                if (setup.ShowDialog() != DialogResult.OK) return;
+            }
         }
         Application.Run(new MainForm(demo));
+    }
+
+    internal static bool NeedsAccountSignIn(AppSettings settings, Func<string, CreditSession?> load)
+    {
+        if (settings.TranslationBackend != "Credits") return false;
+        try { return load(settings.CreditServerUrl) is not { } session || session.ExpiresAt <= DateTimeOffset.UtcNow; }
+        catch (Exception e) when (e is InvalidOperationException or IOException or UnauthorizedAccessException) { return true; }
     }
 }

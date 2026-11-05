@@ -13,6 +13,12 @@ if (args.Length == 2 && args[0] == "--fake-local-ocr")
 
 try
 {
+    if (args.Contains("--desktop-capture-smoke"))
+    {
+        await DesktopModeTests.RunAsync();
+        await DesktopModeTests.RunScreenCaptureAsync();
+        return;
+    }
     if (args.Contains("--desktop-responsiveness-regression"))
     {
         await DesktopResponsivenessTests.RunAsync();
@@ -95,6 +101,7 @@ try
     SpatialCaptureUiTests.Run();
     Console.WriteLine("PASS spatial selection gesture, perspective crop, anchored snapshots and rendering tests");
     Console.WriteLine("PASS VR pixel readback + input binding tests");
+    await DesktopModeTests.RunAsync();
     DesktopTests.Run();
     Console.WriteLine("PASS crop bounds + hotkey parsing tests");
     UiLayoutTests.Run();

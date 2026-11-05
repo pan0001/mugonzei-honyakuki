@@ -6,7 +6,7 @@
 
 [官方网站](https://mugonzei.top) · [账户中心](https://mugonzei.top/account.html)
 
-在 SteamVR 中看懂眼前的文字：长按手柄截屏，识别手写或印刷文字，再把译文显示在视野下方的半透明字幕条里。为无言交流场景设计，也可用于游戏内标牌、菜单与聊天文字。
+在 Windows 桌面或 SteamVR 中截取手写和印刷文字，在屏幕或头显下方阅读翻译字幕。
 
 [下载 Windows 版](https://github.com/pan0001/mugonzei-honyakuki/releases) · [反馈问题](https://github.com/pan0001/mugonzei-honyakuki/issues)
 
@@ -28,7 +28,7 @@
 
 ## 运行要求
 
-- Windows x64、SteamVR，以及可通过 SteamVR 使用的头显和手柄。
+- Windows x64。桌面模式不需要 SteamVR 或头显；VR 模式需要兼容的头显和手柄。
 - Codex 模式：已安装并登录的 Codex CLI；它会调用在线模型，不是离线推理。
 - 其他 AI API：可用的兼容服务；识图需支持图片输入，AI 手写模式还需支持多图输入。
 - Google Translate 网页模式：网络连接及 Microsoft Edge WebView2 Runtime。
@@ -38,15 +38,12 @@
 
 ## 快速开始
 
-1. 从 [Releases](https://github.com/pan0001/mugonzei-honyakuki/releases) 下载 Windows 压缩包，**完整解压**到可写目录。不要只复制 `.exe`。
-2. 启动 SteamVR、连接头显并进入游戏，再运行 `SteamVrTranslator.exe`。首次启动会自动显示三步配置向导。
-3. 第一步按卡片选择服务，依次为「账号积分服务（推荐）」「使用自己的 API 服务」「连接本机 Codex」「本地 OCR + Google 翻译」。新用户默认选择账号积分服务，使用 `https://api.mugonzei.top` 和「手写体 OCR（AI）→ 翻译」。选择卡片不会上传截图或调用模型。
-4. 第二步连接所选服务，并确认识图方式与目标语言。账号服务可点击「登录 / 注册 / 兑换积分」打开账号窗口，使用运营者发放的兑换码获得积分；勾选「使用其他积分服务器」可修改自建服务地址。自备 API 必须填写地址和模型，未启用鉴权的本机服务可不填密钥。Codex 模型可留空，思考程度默认为「自动（按阶段）」。选择 Google 会把不兼容的 AI 识图方式改为本地 OCR，只能搭配本地 OCR 或本地日语 OCR。打开向导或账号窗口本身不会自动登录或联网。
-5. 第三步选择截图来源，检查快捷键、VR 手柄设置与摘要，然后点击「保存并进入工作台」。完成后才会打开工作台、连接 SteamVR 并启用快捷键。
-6. 对准文字，按住左手 X。**1.5 秒圆环满时截屏并开始翻译**；此时松开即可等待字幕。识别和翻译另需时间，长按计时不等于总等待时间。
-7. 若不需要这次翻译，继续按到 **3 秒**，第二圈满时取消并收起字幕。先松开，再次长按可获取新截图。
+1. [下载已发布的 Windows 便携版](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.3-preview/Mugonzei-Honyakuki-win-x64-v0.2.3-preview.zip)，完整解压后运行目录中的 `SteamVrTranslator.exe`。GitHub 的 `Source code` 只含源码。以下是开发版的新流程，已发布的 v0.2.3 界面有所不同。
+2. 选择翻译服务：账号积分服务、自备 API、本机 Codex 或本地 OCR + Google 翻译。
+3. 选择积分服务后，在独立登录页输入用户名和密码。登录成功会自动进入画面选择；新用户可打开注册链接。充值、兑换和订单位于工作台的「账号与积分」。其他服务会显示自己的配置，不要求登录积分账号。
+4. 选择「桌面」或「SteamVR」，点击「开始使用」。在桌面其他应用中按 **Ctrl+Alt+T** 即可截取当前主屏，译文显示在桌面下方；快捷键可修改。在 SteamVR 中长按左手柄 **X 1.5 秒**截图翻译；持续按到 **3 秒**取消并收起字幕。
 
-首次配置未完成便关闭向导时，程序会退出，下次启动再次显示向导。已有设置会自动继承，不会强制重新配置；需要修改时，可在「AI 服务」页点击「配置向导」重新打开。重开会保留原服务、地址、识图方式和密钥，取消不会改变已保存的设置。首次启动以 `%LOCALAPPDATA%/SteamVrTranslator/settings.json` 是否存在判断。
+已有配置会保留。使用积分服务且本地没有有效会话时会先显示登录。要重新选择，打开「AI 服务 → 配置向导」，或用 `SteamVrTranslator.exe --setup` 启动。
 
 「检测 Codex 登录」只检查登录状态；「测试字幕」只显示固定例句。识别按钮可先检查原文；AI 识别按钮仍会发送图片。最小化后程序留在系统托盘，关闭窗口则退出。
 
@@ -80,7 +77,7 @@ AI 手写识别通常包含两次视觉请求，翻译再增加一次文字请�
 
 ### 积分服务与爱发电
 
-公开账户后台已上线。首次向导默认选择「账号积分服务（推荐）」并填写 `https://api.mugonzei.top`，第二步可打开账号窗口注册、登录和兑换积分。也可在主界面「AI 服务」选择「积分服务（爱发电）」，确认服务地址并保存后打开「账号与积分」。[网站账户中心](https://mugonzei.top/account.html)与桌面端共用同一账户、余额和记录。网页登录令牌只保留在当前页面内存，刷新或关闭页面后需重新登录。
+公开账户后台已上线。首次向导默认选择「账号积分服务（推荐）」并填写 `https://api.mugonzei.top`，第二步只登录；充值和兑换在工作台的账号窗口中。也可在主界面「AI 服务」选择「积分服务（爱发电）」，确认服务地址并保存后打开「账号与积分」。[网站账户中心](https://mugonzei.top/account.html)与桌面端共用同一账户、余额和记录。网页登录令牌只保留在当前页面内存，刷新或关闭页面后需重新登录。
 
 新版注册需要验证邮箱。在桌面「账号与积分」或网站「创建账户」填写邮箱，点击发送验证码，将邮件中的 6 位数字填回后提交。验证码 10 分钟内有效；不要把注册验证码填到积分兑换框。已有账号仍使用原用户名和密码登录，余额不变。网站和桌面把注册请求发给同一个积分服务器；自建服务的数据由你填写的服务地址对应的运营者保存。
 
@@ -167,6 +164,8 @@ git clone https://github.com/pan0001/mugonzei-honyakuki.git
 cd mugonzei-honyakuki
 .\build.ps1
 ```
+
+制作本地 Windows 安装程序：构建后先运行 `./tools/package-release.ps1` 校验便携包，再用 PowerShell 7 运行 `./tools/package-installer.ps1 -MakeNsis <makensis.exe路径>`（NSIS 3）。输出到 `dist/` 的 Setup EXE 包含软件和 OCR 运行时，按当前用户安装。
 
 脚本会准备缺失的 OCR 资源、运行测试并生成自包含发布目录：`dist/SteamVrTranslator/`。本地日语运行时安装在项目私有目录，不修改全局 Python。NDLOCR-Lite 固定为 1.3.1；模型与依赖来源、校验信息见准备脚本和生成的运行时清单。
 

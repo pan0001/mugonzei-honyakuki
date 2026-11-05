@@ -20,6 +20,7 @@ public sealed class AppSettings
     [JsonIgnore] public string ApiKey { get; set; } = "";
     public string TargetLanguage { get; set; } = "简体中文";
     public string OcrLanguages { get; set; } = "eng+jpn";
+    public bool DesktopMode { get; set; }
     public string CaptureMode { get; set; } = "VR 左眼";
     public float CropX { get; set; } = 0;
     public float CropY { get; set; } = 0;

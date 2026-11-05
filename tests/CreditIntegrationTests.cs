@@ -172,17 +172,17 @@ public static class CreditIntegrationTests
         var initial = new AppSettings { TranslationBackend = "Credits", ProcessingMode = "Handwriting",
             CreditServerUrl = "https://credit-fixture.invalid/", ApiKey = "synthetic-kept-key" };
         AppSettings? saved = null;
-        using (var wizard = new SetupWizardForm(initial, draft => saved = draft, firstRun: false, loadSession: _ => null))
+        using (var wizard = new SetupWizardForm(initial, draft => saved = draft, firstRun: false,
+                   authenticate: SetupWizardTests.FixtureLogin, startAtLogin: true))
         {
-            Check(wizard.ReadSettingsDraft().CreditServerUrl == initial.CreditServerUrl, "Wizard restores credit configuration");
-            Check(wizard.TryAdvance(), "Credit backend may advance without local login or network access");
-            var endpoint = Find(wizard).OfType<TextBox>().Single(control => control.Name == "wizardCreditServerUrl");
-            endpoint.Text = "http://untrusted.invalid";
-            Check(!wizard.TryAdvance(), "Wizard must reject non-loopback cleartext service addresses");
-            endpoint.Text = "http://127.0.0.1:5187";
-            Check(wizard.TryAdvance() && wizard.TryFinish(), "Local test service is allowed and saves without contacting it");
-            Check(saved is { TranslationBackend: "Credits", ProcessingMode: "Handwriting" }
-                && saved.ApiKey == initial.ApiKey, "Choosing credit mode must preserve hidden API credentials");
+            wizard.StartPosition = FormStartPosition.Manual; wizard.Location = new Point(-20000, -20000); wizard.ShowInTaskbar = false;
+            wizard.Show(); Application.DoEvents();
+            Check(wizard.CurrentStep == 1 && !wizard.TryAdvance() && wizard.ReadSettingsDraft().CreditServerUrl == initial.CreditServerUrl,
+                "Existing logged-out credit settings open directly on sign-in for their original service");
+            SetupWizardTests.SubmitFixtureLogin(wizard);
+            Check(wizard.TryFinish() && saved is { TranslationBackend: "Credits", ProcessingMode: "Handwriting" }
+                && saved.ApiKey == initial.ApiKey && saved.CreditServerUrl == initial.CreditServerUrl,
+                "A successful login and mode choice preserve credentials and billing destination");
         }
         using var form = new MainForm(true);
         try

@@ -6,7 +6,7 @@
 
 [Official website](https://mugonzei.top) · [Account center](https://mugonzei.top/account.html)
 
-Read the text in front of you in SteamVR: hold a controller button to capture the view, recognize handwritten or printed text, and display the translation in a translucent subtitle bar below your line of sight. Designed for nonverbal communication, it can also help with in-game signs, menus, and chat text.
+Translate handwritten or printed text on a Windows desktop or in SteamVR, with subtitles near the bottom of the monitor or headset view.
 
 [Download for Windows](https://github.com/pan0001/mugonzei-honyakuki/releases) · [Report an issue](https://github.com/pan0001/mugonzei-honyakuki/issues)
 
@@ -28,7 +28,7 @@ Read the text in front of you in SteamVR: hold a controller button to capture th
 
 ## Requirements
 
-- Windows x64, SteamVR, and a headset and controllers that work through SteamVR.
+- Windows x64. Desktop mode requires no SteamVR or headset. VR mode requires a compatible headset and controllers.
 - Codex mode: an installed Codex CLI with an active login. It calls an online model; inference is not offline.
 - Other AI APIs: an available compatible service. Image analysis requires image input support, and AI handwriting mode also requires support for multiple images in one request.
 - Google Translate webpage mode: an internet connection and Microsoft Edge WebView2 Runtime.
@@ -38,15 +38,12 @@ The desktop interface is currently mainly in Simplified Chinese. This repository
 
 ## Quick start
 
-1. Download the Windows archive from [Releases](https://github.com/pan0001/mugonzei-honyakuki/releases) and **extract the entire archive** into a writable directory. Do not copy just the `.exe`.
-2. Start SteamVR, connect your headset, enter the game, then run `SteamVrTranslator.exe`. A three-step setup wizard opens automatically on first launch.
-3. In step one, choose a service card. In order, they are 「账号积分服务（推荐）」 (Account Credit Service, Recommended), 「使用自己的 API 服务」 (Use Your Own API), 「连接本机 Codex」 (Connect Local Codex), and 「本地 OCR + Google 翻译」 (Local OCR + Google Translate). New users start with the account credit service at `https://api.mugonzei.top` and 「手写体 OCR（AI）→ 翻译」 (AI Handwriting OCR → Translation). Selecting a card does not upload screenshots or call a model.
-4. In step two, configure the service and confirm the image recognition mode and target language. For the account service, click 「登录 / 注册 / 兑换积分」 (Sign In / Register / Redeem Credits) to open the account window and redeem an operator-issued code. Select 「使用其他积分服务器」 (Use Another Credit Server) to change the address for a self-hosted service. Your own API requires an address and model; a local service without authentication can leave the key blank. The Codex model can be blank, with reasoning effort defaulting to 「自动（按阶段）」 (Automatic by Stage). Selecting Google replaces an incompatible AI recognition mode with local OCR; Google supports only local OCR or local Japanese OCR. Opening the wizard or account window does not automatically sign in or make network requests.
-5. In step three, choose the capture source and review the hotkeys, VR controller settings, and summary, then click 「保存并进入工作台」 (Save and Open Workspace). Only after completion does the app open the workspace, connect to SteamVR, and enable hotkeys.
-6. Face the text and hold the left X button. **When the ring fills at 1.5 seconds, the app captures the view and starts translation.** Release the button and wait for the subtitles. Recognition and translation take additional time; the hold timer is not the total waiting time.
-7. If you no longer need that translation, keep holding until **3 seconds**. When the second ring fills, the task is canceled and the subtitles are hidden. Release the button before holding it again to take a new screenshot.
+1. [Download the published Windows portable build](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.3-preview/Mugonzei-Honyakuki-win-x64-v0.2.3-preview.zip), extract the complete archive, and run `SteamVrTranslator.exe`. GitHub’s `Source code` ZIP is for developers. The steps below describe the development build; the published v0.2.3 interface differs.
+2. Choose the account credit service, your own API, local Codex, or local OCR with Google Translate.
+3. The credit service opens a dedicated sign-in page. Enter your username and password; signing in takes you directly to screen selection. New users can follow the registration link. Top-ups, redemption codes and orders are under Accounts & Credits in the workspace. Other providers do not require a credit account.
+4. Choose Desktop (「桌面」) or SteamVR, then Start (「开始使用」). In desktop mode, press **Ctrl+Alt+T** in another app to translate the primary monitor and read the subtitle near the bottom of the screen. The hotkey is configurable. In SteamVR, hold **left X for 1.5 seconds** to capture and translate or **3 seconds** to cancel.
 
-Closing the wizard before completing first-time setup exits the app; the wizard appears again on the next launch. Existing settings are reused automatically without forcing setup again. To reopen it, click 「配置向导」 (Setup Wizard) on the 「AI 服务」 (AI Services) page. Reopening preserves your service, address, recognition mode, and keys; canceling leaves saved settings unchanged. The app identifies a first launch by the absence of `%LOCALAPPDATA%/SteamVrTranslator/settings.json`.
+Existing settings are preserved. Credit mode prompts for sign-in when no valid local session is available. To reconfigure, open AI Services → Setup Wizard or launch `SteamVrTranslator.exe --setup`.
 
 「检测 Codex 登录」 (Check Codex Login) only checks login status. 「测试字幕」 (Test Subtitles) only displays a fixed example sentence. Use a recognition button to check the source text first; AI recognition buttons still send images. Minimizing keeps the app in the system tray; closing the window exits the app.
 
@@ -80,7 +77,7 @@ AI handwriting recognition usually makes two vision requests, with one additiona
 
 ### Credit service and Afdian
 
-The public account backend is live. First-time setup selects 「账号积分服务（推荐）」 (Account Credit Service, Recommended) with `https://api.mugonzei.top` already filled in. Step two lets you open the account window to register, sign in, or redeem credits. You can also select 「积分服务（爱发电）」 on the main 「AI 服务」 page, confirm and save the server address, then open 「账号与积分」. The [website account center](https://mugonzei.top/account.html) uses the same account, balance, and records as the desktop app. Website session tokens remain only in the current page's memory; reloading or closing the page requires signing in again.
+The public account backend is live. First-time setup selects 「账号积分服务（推荐）」 (Account Credit Service, Recommended) with `https://api.mugonzei.top` already filled in. Step two is for sign-in only; top-ups and redemptions are available in the workspace. You can also select 「积分服务（爱发电）」 on the main 「AI 服务」 page, confirm and save the server address, then open 「账号与积分」. The [website account center](https://mugonzei.top/account.html) uses the same account, balance, and records as the desktop app. Website session tokens remain only in the current page's memory; reloading or closing the page requires signing in again.
 
 New registrations require email verification. In the desktop account window or the website’s Create Account tab, enter your email, request a code, and enter the six digits from the message within ten minutes. The email code is separate from a credit redemption code. Existing users keep their balance and sign in with their original username and password. The website and desktop use the same official account server by default. If you select a custom server, its operator stores your account data.
 
@@ -167,6 +164,8 @@ git clone https://github.com/pan0001/mugonzei-honyakuki.git
 cd mugonzei-honyakuki
 .\build.ps1
 ```
+
+To create a local Windows installer, first run `./tools/package-release.ps1` to verify the portable archive, then run `./tools/package-installer.ps1 -MakeNsis <path-to-makensis.exe>` from PowerShell 7 with NSIS 3. The Setup EXE in `dist/` includes the app and OCR runtime and installs for the current user.
 
 The script prepares missing OCR resources, runs tests, and creates a self-contained release directory at `dist/SteamVrTranslator/`. The local Japanese runtime is installed in a private project directory without changing global Python. NDLOCR-Lite is pinned to 1.3.1. See the preparation scripts and generated runtime manifest for model and dependency sources and verification details.
 

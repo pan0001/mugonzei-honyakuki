@@ -81,7 +81,7 @@ public sealed class CreditServiceClient : IDisposable
             throw new InvalidOperationException("请输入邮件中的 6 位数字验证码。");
         try
         {
-            return await AuthenticateAsync("register", new { username, password, email, code }, token).ConfigureAwait(false);
+            return await AuthenticateAsync("register", username, new { username, password, email, code }, token).ConfigureAwait(false);
         }
         catch (CreditServiceException error) when (error.StatusCode == HttpStatusCode.BadRequest)
         { throw new CreditServiceException("注册信息或验证码无效，请检查邮箱和最新的 6 位验证码。", error.StatusCode); }
@@ -93,8 +93,11 @@ public sealed class CreditServiceClient : IDisposable
         { throw new CreditServiceException("注册结果尚未确认。请先尝试用刚填写的用户名和密码登录。", isTransient: true); }
     }
 
-    public Task<CreditSession> LoginAsync(string username, string password, CancellationToken token = default) =>
-        AuthenticateAsync("login", new { username = ValidateCredentials(username, password), password }, token);
+    public Task<CreditSession> LoginAsync(string username, string password, CancellationToken token = default)
+    {
+        username = ValidateCredentials(username, password);
+        return AuthenticateAsync("login", username, new { username, password }, token);
+    }
 
     private static string ValidateEmail(string email)
     {
@@ -105,7 +108,7 @@ public sealed class CreditServiceClient : IDisposable
         return value;
     }
 
-    private static string ValidateCredentials(string username, string password)
+    internal static string ValidateCredentials(string username, string password)
     {
         username = (username ?? "").Trim().ToLowerInvariant();
         if (username.Length is < 3 or > 32 || username.Any(c => !(c is >= 'a' and <= 'z' or >= '0' and <= '9' or '_' or '-')))
@@ -115,12 +118,12 @@ public sealed class CreditServiceClient : IDisposable
         return username;
     }
 
-    private async Task<CreditSession> AuthenticateAsync(string action, object credentials, CancellationToken token)
+    private async Task<CreditSession> AuthenticateAsync(string action, string username, object credentials, CancellationToken token)
     {
         var response = await SendAsync<LoginResponse>(HttpMethod.Post, "v1/auth/" + action, credentials, null, token).ConfigureAwait(false);
-        if (response.ExpiresAt <= DateTimeOffset.UtcNow) throw InvalidResponse();
-        sessions.Save(ServerUrl, response.Token, response.Username, response.ExpiresAt);
-        return sessions.Load(ServerUrl)!;
+        if (response.ExpiresAt <= DateTimeOffset.UtcNow || !string.Equals(username, response.Username, StringComparison.OrdinalIgnoreCase))
+            throw InvalidResponse();
+        return sessions.Save(ServerUrl, response.Token, response.Username, response.ExpiresAt, token);
     }
 
     public async Task LogoutAsync(CancellationToken token = default)

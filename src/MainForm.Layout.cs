@@ -9,6 +9,7 @@ internal sealed partial class MainForm
     private readonly Label pageTitle = new() { AutoSize = true };
     private readonly Label pageDescription = new() { AutoSize = true };
     private readonly UiButton saveSettings = new() { Text = "保存设置", Primary = true, AutoSize = true };
+    private readonly Button reconnect = Button("连接 SteamVR");
 
     private void BuildUi()
     {
@@ -54,6 +55,7 @@ internal sealed partial class MainForm
         BuildSubtitleSettings();
         InitializeSettingsControls();
         UiNativeTheme.ApplyDarkWindow(this);
+        WindowChrome.Apply(this);
         tabs.SelectedIndexChanged += (_, _) => UpdateNavigation();
         UpdateNavigation();
         ResumeLayout(true);
@@ -61,15 +63,10 @@ internal sealed partial class MainForm
 
     private Control BuildSidebar()
     {
-        var sidebar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4, BackColor = UiTheme.Sidebar, Padding = new Padding(20, 30, 20, 20), Margin = Padding.Empty };
-        sidebar.RowStyles.Add(new RowStyle(SizeType.Absolute, 110));
+        var sidebar = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 3, BackColor = UiTheme.Sidebar, Padding = new Padding(20, 26, 20, 20), Margin = Padding.Empty };
         sidebar.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         sidebar.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
         sidebar.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        var brand = new FlowLayoutPanel { Dock = DockStyle.Fill, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty };
-        brand.Controls.Add(new Label { Text = "V R  /  T R A N S L A T E", AutoSize = true, ForeColor = Accent, Font = new Font("Segoe UI", 8, FontStyle.Bold), Margin = new Padding(0, 0, 0, 12) });
-        brand.Controls.Add(new Label { Text = "无言势翻译器", AutoSize = true, Font = new Font(Font.FontFamily, 16, FontStyle.Bold), Margin = Padding.Empty });
-        sidebar.Controls.Add(brand, 0, 0);
         var nav = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty };
         string[] labels = ["翻译工作台", "AI 服务", "截图与按键", "字幕显示"];
         for (int i = 0; i < labels.Length; i++)
@@ -79,18 +76,18 @@ internal sealed partial class MainForm
             button.Click += (_, _) => tabs.SelectedIndex = index;
             navigation.Add(button); nav.Controls.Add(button);
         }
-        sidebar.Controls.Add(nav, 0, 1);
+        sidebar.Controls.Add(nav, 0, 0);
         var footer = new FlowLayoutPanel { Dock = DockStyle.Top, AutoSize = true, FlowDirection = FlowDirection.TopDown, WrapContents = false, Margin = Padding.Empty };
-        footer.Controls.Add(new Label { Text = "STEAMVR 连接", AutoSize = true, ForeColor = UiTheme.Muted, Font = new Font("Segoe UI", 8, FontStyle.Bold), Margin = new Padding(0, 0, 0, 10) });
+        footer.Controls.Add(new Label { Text = "运行状态", AutoSize = true, ForeColor = UiTheme.Muted, Font = new Font("Segoe UI", 8, FontStyle.Bold), Margin = new Padding(0, 0, 0, 10) });
         vrStatus.MaximumSize = new Size(178, 90); vrStatus.AutoEllipsis = true;
         vrStatus.Font = new Font(Font.FontFamily, 8.5f); vrStatus.ForeColor = UiTheme.Muted;
         vrStatus.Text = "等待连接"; vrStatus.Margin = new Padding(0, 0, 0, 12);
         footer.Controls.Add(vrStatus);
-        var reconnect = Button("连接 SteamVR"); reconnect.AutoSize = false; reconnect.Size = new Size(180, 40);
+        reconnect.AutoSize = false; reconnect.Size = new Size(180, 40);
         reconnect.Click += (_, _) => ConnectVr(); footer.Controls.Add(reconnect);
         sidebarInputHelp.Font = new Font(Font.FontFamily, 8); sidebarInputHelp.Margin = new Padding(0, 16, 0, 0);
         footer.Controls.Add(sidebarInputHelp);
-        sidebar.Controls.Add(footer, 0, 3);
+        sidebar.Controls.Add(footer, 0, 2);
         return sidebar;
     }
 
@@ -99,7 +96,8 @@ internal sealed partial class MainForm
         int index = Math.Max(0, tabs.SelectedIndex);
         string[] titles = ["翻译工作台", "AI 服务", "截图与按键", "字幕显示"];
         string[] descriptions = ["截取眼前画面，或用手柄框选文字并固定译文。", "选择识别方式与翻译服务，支持视觉模型直接读图。", "设置画面来源、识别范围，以及触发翻译的方式。", "设置普通字幕；框选译文保留在原位。"];
-        pageTitle.Text = titles[index]; pageDescription.Text = descriptions[index];
+        pageTitle.Text = titles[index];
+        pageDescription.Text = index == 0 && settings.DesktopMode ? "按全局快捷键截取主显示器，在桌面字幕中阅读译文。" : descriptions[index];
         for (int i = 0; i < navigation.Count; i++) navigation[i].Selected = i == index;
         saveSettings.Visible = index != 0;
     }
@@ -136,7 +134,7 @@ internal sealed partial class MainForm
         sourceText.PlaceholderText = "识别出的原文会显示在这里";
         var source = new UiCard { Text = "识别原文", Caption = "手写 / 本地 OCR 保留原文，直接识图显示输入说明", Dock = DockStyle.Fill, Margin = new Padding(0, 0, 12, 0) };
         source.Controls.Add(sourceText); left.Controls.Add(source, 0, 1); columns.Controls.Add(left, 0, 0);
-        var result = new UiCard { Text = "翻译结果", Caption = "完成后会自动同步到 VR 字幕", Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 0) };
+        var result = new UiCard { Text = "翻译结果", Caption = "译文会同步显示为字幕", Dock = DockStyle.Fill, Margin = new Padding(0, 0, 0, 0) };
         var resultLayout = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 2, Margin = Padding.Empty };
         resultLayout.RowStyles.Add(new RowStyle(SizeType.Percent, 100)); resultLayout.RowStyles.Add(new RowStyle(SizeType.AutoSize));
         translatedText.Font = new Font(Font.FontFamily, 12);
@@ -203,12 +201,16 @@ internal sealed partial class MainForm
     {
         var stack = SettingsPage("截图与按键", 2);
         var capture = SettingsCard(stack, "画面与识别", "缩小识别范围，可以避开无关的界面文字");
-        SettingRow(capture, "截图来源", captureMode);
+        SettingRow(capture, "使用模式", workspaceMode);
+        SettingRow(capture, "VR 模式截图来源", captureMode);
         var crop = Flow(); crop.Controls.AddRange([Tiny("左 %"), cropX, Tiny("上 %"), cropY, Tiny("宽 %"), cropW, Tiny("高 %"), cropH]);
         SettingRow(capture, "识别范围", crop);
         SettingRow(capture, "OCR 语言", languages);
         SettingRow(capture, "", Note("eng 英语 · jpn 日语 · kor 韩语 · chi_sim 简中 · chi_tra 繁中\n仅用于普通本地 OCR，使用 + 连接，例如 eng+jpn。\n本地日语手写使用独立模型；AI 手写自动识别中、日、英。两种手写模式均不使用此语言设置。"));
-        var inputs = SettingsCard(stack, "触发方式", "手柄可切换拉框或双圈长按；键盘快捷键直接截图");
+        var keyboard = SettingsCard(stack, "键盘快捷键", "其他应用在前台或翻译器最小化时也能触发");
+        SettingRow(keyboard, "翻译快捷键", hotkeyText);
+        SettingRow(keyboard, "固定快捷键", Note("Ctrl + Alt + ← / →  翻页\nCtrl + Alt + H  显示或隐藏上次译文"));
+        var inputs = vrInputSettings = SettingsCard(stack, "VR 手柄", "手柄可切换拉框或双圈长按");
         SettingRow(inputs, "VR 手柄", controller);
         SettingRow(inputs, "框选模式", spatialSelection);
         var distance = Flow(); distance.Controls.AddRange([selectionDistance, Tiny("米 · 拉框平面距按下时头显的距离")]);
@@ -217,8 +219,6 @@ internal sealed partial class MainForm
         SettingRow(inputs, "", Note("框选始终使用 VR 画面，识别范围由手柄矩形决定；上方截图来源与百分比裁剪仅用于普通截图。"));
         var binding = Button("打开 SteamVR 手柄绑定"); binding.Click += (_, _) => TryAction(() => vr.OpenBindings());
         SettingRow(inputs, "自定义绑定", binding);
-        SettingRow(inputs, "翻译快捷键", hotkeyText);
-        SettingRow(inputs, "固定快捷键", Note("Ctrl + Alt + ← / →  翻页\nCtrl + Alt + H  显示或隐藏上次译文"));
         SettingRow(inputs, "其他手柄", Note("Index：左 A；Vive：右菜单键。左摇杆 / 左菜单键翻页。"));
     }
 
@@ -312,6 +312,13 @@ internal sealed partial class MainForm
         showGoogleBrowser.Click += async (_, _) => await ShowGoogleBrowser();
         target.TextChanged += (_, _) => { if (googleTranslationCheck is null && googleTestResult.Text.Length > 0) googleTestResult.Text = "目标语言已变更，请重新测试谷歌翻译。"; };
         captureMode.Items.AddRange(["VR 左眼", "桌面主显示器"]);
+        workspaceMode.Items.AddRange(["SteamVR · 头显字幕", "桌面 · 主显示器字幕"]);
+        workspaceMode.SelectedIndexChanged += (_, _) =>
+        {
+            bool useVr = workspaceMode.SelectedIndex != 1;
+            captureMode.Enabled = useVr;
+            vrInputSettings.Visible = useVr;
+        };
         selectionDistance.Name = "selectionDistance";
         spatialSelection.CheckedChanged += (_, _) => UpdateSelectionHelp();
     }

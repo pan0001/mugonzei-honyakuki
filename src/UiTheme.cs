@@ -6,6 +6,12 @@ namespace SteamVrTranslator;
 
 internal static class UiTheme
 {
+    private static readonly Lazy<Icon> BrandIcon = new(() =>
+    {
+        string path = Path.Combine(AppContext.BaseDirectory, "assets", "mugonzei.ico");
+        return File.Exists(path) ? new Icon(path) : SystemIcons.Application;
+    });
+    internal static Icon AppIcon => BrandIcon.Value;
     public static Color Background { get; } = Color.FromArgb(0x10, 0x15, 0x1C);
     public static Color Sidebar { get; } = Color.FromArgb(0x14, 0x1C, 0x25);
     public static Color Card { get; } = Color.FromArgb(0x1A, 0x25, 0x31);

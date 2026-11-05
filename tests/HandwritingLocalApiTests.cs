@@ -179,7 +179,7 @@ public static class HandwritingLocalApiTests
         if (!condition) throw new Exception("Local handwriting API test failed: " + message);
     }
 
-    private sealed class LocalServer : IDisposable
+    internal sealed class LocalServer : IDisposable
     {
         private readonly HttpListener listener = new();
         private readonly List<HttpListenerContext> contexts = [];

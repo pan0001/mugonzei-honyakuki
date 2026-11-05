@@ -25,7 +25,7 @@ internal sealed class SetupServiceChoice : RadioButton
     }
 
     public override Size GetPreferredSize(Size proposedSize) => new(
-        proposedSize.Width > 0 ? proposedSize.Width : 500, (int)Math.Ceiling(94 * DeviceDpi / 96f));
+        proposedSize.Width > 0 ? proposedSize.Width : 500, (int)Math.Ceiling(72 * DeviceDpi / 96f));
 
     protected override void OnPaint(PaintEventArgs e)
     {
@@ -42,7 +42,7 @@ internal sealed class SetupServiceChoice : RadioButton
         using var outline = new Pen(Checked ? UiTheme.Accent : hovered ? UiTheme.Muted : UiTheme.Border, Checked ? S(1.5f) : 1);
         g.FillPath(brush, shape); g.DrawPath(outline, shape);
 
-        var numberBounds = new Rectangle(S(16), S(21), S(34), S(34));
+        var numberBounds = new Rectangle(S(16), S(18), S(32), S(32));
         using var numberBrush = new SolidBrush(Checked ? UiTheme.Mix(fill, UiTheme.Accent, .14f) : UiTheme.Input);
         g.FillEllipse(numberBrush, numberBounds);
         using var numberFont = new Font(Font.FontFamily, 10f, FontStyle.Bold);
@@ -51,11 +51,11 @@ internal sealed class SetupServiceChoice : RadioButton
         int left = S(64), right = S(46);
         using var titleFont = new Font(Font.FontFamily, 12f, FontStyle.Bold);
         using var descriptionFont = new Font(Font.FontFamily, 9f);
-        TextRenderer.DrawText(g, Text, titleFont, new Rectangle(left, S(17), Math.Max(1, Width - left - right), S(27)), UiTheme.Ink,
+        TextRenderer.DrawText(g, Text, titleFont, new Rectangle(left, S(10), Math.Max(1, Width - left - right), S(27)), UiTheme.Ink,
             TextFormatFlags.Left | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis | TextFormatFlags.NoPadding);
-        TextRenderer.DrawText(g, Description, descriptionFont, new Rectangle(left, S(48), Math.Max(1, Width - left - S(20)), Height - S(55)), UiTheme.Muted,
+        TextRenderer.DrawText(g, Description, descriptionFont, new Rectangle(left, S(36), Math.Max(1, Width - left - S(20)), Height - S(39)), UiTheme.Muted,
             TextFormatFlags.Left | TextFormatFlags.NoPrefix | TextFormatFlags.WordBreak | TextFormatFlags.NoPadding);
-        var circle = new Rectangle(Width - S(33), S(23), S(15), S(15));
+        var circle = new Rectangle(Width - S(33), S(18), S(15), S(15));
         using var circlePen = new Pen(Checked ? UiTheme.Accent : UiTheme.Muted, Math.Max(1, S(1.3f)));
         g.DrawEllipse(circlePen, circle);
         if (Checked)

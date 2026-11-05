@@ -19,7 +19,7 @@ public sealed class CreditSessionStore
         lock (Gate) return LoadCore(endpoint);
     }
 
-    internal void Save(string serverUrl, string token, string username, DateTimeOffset expiresAt)
+    internal CreditSession Save(string serverUrl, string token, string username, DateTimeOffset expiresAt, CancellationToken cancellation = default)
     {
         string endpoint = CreditServiceClient.NormalizeServerUrl(serverUrl);
         if (string.IsNullOrWhiteSpace(token) || token.Length > 8192 || token.Any(char.IsControl)
@@ -27,12 +27,15 @@ public sealed class CreditSessionStore
             throw new InvalidOperationException("积分服务返回的登录信息无效。");
         lock (Gate)
         {
-            var previous = LoadCore(endpoint);
+            cancellation.ThrowIfCancellationRequested();
+            var previous = LoadCore(endpoint, replacingAfterLogin: true);
+            Guid? recent = previous?.Username == username ? previous.RecentTaskId : null;
             SaveCore(endpoint, new StoredSession
             {
                 Endpoint = endpoint, Token = token, Username = username, ExpiresAt = expiresAt,
-                RecentTaskId = previous?.Username == username ? previous.RecentTaskId : null
-            });
+                RecentTaskId = recent
+            }, cancellation);
+            return new CreditSession(token, username, expiresAt, recent);
         }
     }
 
@@ -60,10 +63,9 @@ public sealed class CreditSessionStore
         }
     }
 
-    private CreditSession? LoadCore(string endpoint)
+    private CreditSession? LoadCore(string endpoint, bool replacingAfterLogin = false)
     {
         string path = SessionPath(endpoint);
-        if (!File.Exists(path)) return null;
         try
         {
             if (new FileInfo(path).Length > 65536) throw new InvalidDataException();
@@ -80,13 +82,16 @@ public sealed class CreditSessionStore
             }
             finally { CryptographicOperations.ZeroMemory(clear); }
         }
+        catch (FileNotFoundException) { return null; }
+        catch (DirectoryNotFoundException) { return null; }
         catch (Exception error) when (error is CryptographicException or JsonException or InvalidDataException)
         {
-            throw new InvalidOperationException("积分登录信息无法解密或已损坏，请在账户窗口清除本地登录后重新登录。");
+            if (replacingAfterLogin) return null;
+            throw new InvalidOperationException("本地登录信息无法读取，请重新登录。");
         }
     }
 
-    private void SaveCore(string endpoint, StoredSession stored)
+    private void SaveCore(string endpoint, StoredSession stored, CancellationToken cancellation = default)
     {
         byte[] clear = JsonSerializer.SerializeToUtf8Bytes(stored);
         byte[] encrypted;
@@ -98,6 +103,7 @@ public sealed class CreditSessionStore
         try
         {
             File.WriteAllBytes(temporary, encrypted);
+            cancellation.ThrowIfCancellationRequested();
             if (File.Exists(destination)) File.Replace(temporary, destination, null);
             else File.Move(temporary, destination);
         }

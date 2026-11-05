@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace SteamVrTranslator;
 
@@ -13,7 +14,7 @@ internal sealed partial class MainForm : Form
     private readonly LocalJapaneseOcrService localJapaneseOcr = new();
     private readonly TranslationService translator = new();
     private readonly System.Windows.Forms.Timer pollTimer = new() { Interval = 16 };
-    private readonly NotifyIcon tray = new() { Text = "无言势翻译器", Icon = SystemIcons.Application };
+    private readonly NotifyIcon tray = new() { Text = "无言势翻译器", Icon = UiTheme.AppIcon };
     private readonly Label status = new() { AutoSize = true, ForeColor = Accent, Padding = new Padding(4, 8, 4, 8) };
     private readonly Label vrStatus = new() { AutoSize = true, ForeColor = Ink, MaximumSize = new Size(1000, 0) };
     private readonly TextBox sourceText = Readout();
@@ -43,6 +44,9 @@ internal sealed partial class MainForm : Form
     private readonly Button showGoogleBrowser = Button("查看翻译网页");
     private readonly Label googleTestResult = Note("");
     private readonly ComboBox captureMode = new UiComboBox() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 230 };
+    private readonly ComboBox workspaceMode = new UiComboBox() { Name = "workspaceMode", DropDownStyle = ComboBoxStyle.DropDownList, Width = 230 };
+    private UiCard vrInputSettings = null!;
+    private DesktopSubtitleForm? desktopSubtitle;
     private readonly NumericUpDown cropX = Number(0, 99, 0, 1), cropY = Number(0, 99, 0, 1), cropW = Number(1, 100, 100, 1), cropH = Number(1, 100, 100, 1);
     private readonly NumericUpDown overlayWidth = Number(.3m, 2, .9m, .1m), overlayDistance = Number(.4m, 4, 1.2m, .1m), overlayY = Number(-2, 2, -.35m, .05m), duration = Number(0, 300, 20, 1);
     private readonly CheckBox controller = new() { Text = "启用 VR 手柄触发", AutoSize = true }, showSource = new() { Text = "叠层同时显示原文", AutoSize = true };
@@ -142,7 +146,8 @@ internal sealed partial class MainForm : Form
                 try { hotkeys.Register(binding.Item1, binding.Item2); }
                 catch (Exception ex) { shortcutErrors.Add(ex.Message); }
             if (shortcutErrors.Count > 0) SetStatus(string.Join(" ", shortcutErrors));
-            if (!demo) ConnectVr();
+            UpdateSelectionHelp();
+            ApplyCaptureEnvironment();
             pollTimer.Start();
             if (demo) ShowDemo();
             else if (loadError != null) SetStatus(loadError);
@@ -162,6 +167,7 @@ internal sealed partial class MainForm : Form
         apiImageDetail.SelectedIndex = settings.ApiImageDetail switch { "High" => 1, "Low" => 2, "Auto" => 3, _ => 0 };
         apiStream.Checked = settings.ApiStream;
         target.Text = settings.TargetLanguage; languages.Text = settings.OcrLanguages; hotkeyText.Text = settings.Hotkey;
+        workspaceMode.SelectedIndex = settings.DesktopMode ? 1 : 0;
         captureMode.SelectedItem = settings.CaptureMode; if (captureMode.SelectedIndex < 0) captureMode.SelectedIndex = 0;
         Put(cropX, settings.CropX * 100); Put(cropY, settings.CropY * 100); Put(cropW, settings.CropWidth * 100); Put(cropH, settings.CropHeight * 100);
         Put(overlayWidth, settings.OverlayWidth); Put(overlayDistance, settings.OverlayDistance); Put(overlayY, settings.OverlayVerticalOffset); Put(duration, settings.DisplaySeconds);
@@ -388,7 +394,8 @@ internal sealed partial class MainForm : Form
             ApiBaseUrl = endpoint.Text.Trim(), ApiModel = model.Text.Trim(), ApiKey = apiKey.Text.Trim(),
             ApiImageDetail = SelectedApiImageDetail, ApiStream = apiStream.Checked,
             TargetLanguage = target.Text.Trim(), OcrLanguages = languages.Text.Trim(), Hotkey = hotkeyText.Text.Trim(),
-            CaptureMode = captureMode.Text, CropX = (float)cropX.Value / 100, CropY = (float)cropY.Value / 100,
+            DesktopMode = workspaceMode.SelectedIndex == 1, CaptureMode = captureMode.Text,
+            CropX = (float)cropX.Value / 100, CropY = (float)cropY.Value / 100,
             CropWidth = (float)cropW.Value / 100, CropHeight = (float)cropH.Value / 100,
             OverlayWidth = (float)overlayWidth.Value, OverlayDistance = (float)overlayDistance.Value,
             OverlayVerticalOffset = (float)overlayY.Value, DisplaySeconds = (int)duration.Value,
@@ -414,10 +421,18 @@ internal sealed partial class MainForm : Form
             try { hotkeys?.Register(Hotkeys.Translate, settings.Hotkey); } catch { }
             throw;
         }
+        bool modeChanged = settings.DesktopMode != changed.DesktopMode;
         settings = changed;
         string? runtimeWarning = null;
         try
         {
+            if (modeChanged)
+            {
+                desktopSubtitle?.Hide();
+                overlayVisible = holdOverlayVisible = false; overlayGestureId = 0; overlayAnchor = null; hideAt = 0;
+                ClearPages();
+                ApplyCaptureEnvironment();
+            }
             CancelSelectionCapture();
             vr.SelectionEnabled = false;
             ConfigureVrSelection();
@@ -480,10 +495,18 @@ internal sealed partial class MainForm : Form
         }
         if (selection is null) CancelSelectionCapture();
         else if (!vr.IsAnchorValid(selection.Anchor)) { SetStatus("框选位置已失效，请重新拉框。"); return; }
-        if (!captureRequests.Enqueue(new CaptureRequest(ocrOnly, source, gestureId, selection)))
+        Bitmap? desktopImage = null;
+        if (settings.DesktopMode)
+        {
+            // Snapshot at the keypress. An earlier OCR/API call may still be winding down.
+            try { HideOverlay(); desktopImage = CaptureService.CaptureDesktop(Handle, settings); }
+            catch (Exception error) { ReportCaptureFailure(error, CancellationToken.None); return; }
+        }
+        var next = new CaptureRequest(ocrOnly, source, gestureId, selection, desktopImage, desktopImage is null ? null : DateTime.Now);
+        if (!captureRequests.Enqueue(next))
         {
             RequestCancellation(currentRequest);
-            SetStatus("已收到新的截屏请求，正在停止上一轮并获取新画面…");
+            SetStatus(desktopImage is null ? "已收到新的截屏请求，正在停止上一轮并获取新画面…" : "新桌面截图已获取，正在停止上一轮翻译…");
             return;
         }
         busy = true;
@@ -514,6 +537,7 @@ internal sealed partial class MainForm : Form
         var started = Stopwatch.StartNew();
         long number = ++captureNumber;
         bool captured = false;
+        Bitmap? cropped = request.DesktopImage;
         try
         {
             ValidateBackendMode(settings);
@@ -521,40 +545,33 @@ internal sealed partial class MainForm : Form
             imageBox.Text = $"正在获取截图 #{number} · {request.Source} · 预览暂为上一张";
             sourceText.Clear(); translatedText.Clear();
             ClearPages();
-            Bitmap croppedImage;
-            if (request.Selection is { } snapshot)
+            if (cropped is null && request.Selection is { } snapshot)
             {
                 if (!vr.IsAnchorValid(snapshot.Anchor)) throw new InvalidOperationException("框选位置已失效，请重新拉框。");
-                croppedImage = snapshot.DecodeImage();
+                cropped = snapshot.DecodeImage();
             }
-            else
+            else if (cropped is null)
             {
-                if (settings.CaptureMode == "VR 左眼" && !vr.IsConnected && !vr.Connect()) throw new InvalidOperationException(vr.Status);
+                bool useVrEye = settings.CaptureMode == "VR 左眼";
+                if (useVrEye && !vr.IsConnected && !vr.Connect()) throw new InvalidOperationException(vr.Status);
                 // Neither subtitles, progress nor a selection frame should appear in a capture.
                 captureInProgress = true;
                 HideOverlay(); HideHoldOverlay(); HideSelectionFrame();
-                bool restoreDesktopWindow = settings.CaptureMode != "VR 左眼" && Visible;
-                Bitmap image;
-                if (restoreDesktopWindow) Hide();
-                try
+                if (useVrEye)
                 {
-                    if (settings.CaptureMode == "VR 左眼") vr.PrepareEyeCapture();
+                    vr.PrepareEyeCapture();
                     await Task.Delay(80, token);
-                    image = settings.CaptureMode == "VR 左眼" ? vr.CaptureEye() : CaptureService.CaptureDesktop();
+                    using var image = vr.CaptureEye();
+                    cropped = CaptureService.Crop(image, settings.CropX, settings.CropY, settings.CropWidth, settings.CropHeight);
                 }
-                finally
-                {
-                    captureInProgress = false;
-                    if (restoreDesktopWindow && !closing) Show();
-                }
-                using (image) croppedImage = CaptureService.Crop(image, settings.CropX, settings.CropY, settings.CropWidth, settings.CropHeight);
+                else cropped = CaptureService.CaptureDesktop(Handle, settings);
+                captureInProgress = false;
             }
-            using var cropped = croppedImage;
             token.ThrowIfCancellationRequested();
             var old = preview.Image; preview.Image = new Bitmap(cropped); old?.Dispose();
             saveScreenshotButton.Enabled = true;
             captured = true;
-            imageBox.Text = $"截图 #{number} · {DateTime.Now:HH:mm:ss.fff} · {request.Source} · {cropped.Width} × {cropped.Height}";
+            imageBox.Text = $"截图 #{number} · {request.CapturedAt ?? DateTime.Now:HH:mm:ss.fff} · {request.Source} · {cropped.Width} × {cropped.Height}";
             imageBox.Refresh();
             if (!ocrOnly && settings.TranslationBackend == "Credits" && settings.ProcessingMode is "Image" or "Handwriting")
             {
@@ -639,6 +656,7 @@ internal sealed partial class MainForm : Form
         catch (Exception ex) { ReportCaptureFailure(ex, token); }
         finally
         {
+            cropped?.Dispose();
             currentRequest.Dispose(); currentRequest = null;
             activeGestureId = 0;
             activeAnchor = null;
@@ -651,7 +669,7 @@ internal sealed partial class MainForm : Form
     {
         vr.SelectionDistance = settings.SelectionDistance;
         vr.SelectionMode = settings.SpatialSelectionEnabled;
-        vr.SelectionEnabled = settings.ControllerEnabled && !closing;
+        vr.SelectionEnabled = !settings.DesktopMode && settings.ControllerEnabled && !closing;
     }
 
     private void UpdateSelectionHelp()
@@ -660,6 +678,12 @@ internal sealed partial class MainForm : Form
         selectionHelp.Text = spatialSelection.Checked
             ? "按住左 X，用双手柄分别指向矩形的两个对角；松开 X 提交。\n仅识别框内，译文留在框的位置，翻页不移动。框选距离为前方平面距离。\n固定在 SteamVR 追踪空间；游戏内传送、移动后不会跟随原物体。桌面按钮和快捷键仍使用普通截图。"
             : "1.5 秒：第一圈完成，截屏并翻译。\n3 秒：第二圈完成，取消本次并隐藏字幕。松开后可再次触发。";
+        if (settings.DesktopMode)
+        {
+            workspaceInputHelp.Text = $"桌面模式     按 {settings.Hotkey} 截取主显示器并翻译\n译文显示在桌面下方 · Ctrl + Alt + H 显示或隐藏字幕";
+            sidebarInputHelp.Text = "桌面翻译 · " + settings.Hotkey;
+            return;
+        }
         workspaceInputHelp.Text = settings.SpatialSelectionEnabled
             ? "左手柄 X     按住，用双手柄指向矩形对角 → 松开提交\n译文固定在选区 · 新框替换旧译文 · 快捷键仍为普通截图"
             : "左手柄 X     按住 1.5 秒 → 截屏翻译；继续按到 3 秒 → 取消本次\n松开后可再次触发 · 左摇杆 / 菜单键翻页";
@@ -830,8 +854,23 @@ internal sealed partial class MainForm : Form
         if (pending || active || displayed) SetStatus("第二圈已满，本次翻译已取消，字幕已收起。松开后可重新长按。");
     }
 
+    private void ApplyCaptureEnvironment()
+    {
+        reconnect.Visible = !settings.DesktopMode;
+        UpdateNavigation();
+        pollTimer.Interval = settings.DesktopMode ? 250 : 16;
+        if (settings.DesktopMode)
+        {
+            reconnectAt = 0;
+            if (vr.IsConnected) vr.Disconnect();
+            vrStatus.Text = "桌面模式 · 主显示器";
+        }
+        else if (!demo) ConnectVr();
+    }
+
     private void ConnectVr()
     {
+        if (settings.DesktopMode) { SetStatus("当前使用桌面模式。在「截图与按键」切换到 SteamVR 模式并保存后即可连接。"); return; }
         if (busy) { SetStatus("请等待本次翻译完成后再连接 SteamVR。"); return; }
         reconnectAt = 0; reconnectAttempts = 0; healthyInputSince = 0;
         CancelSelectionCapture();
@@ -843,6 +882,11 @@ internal sealed partial class MainForm : Form
     private void Poll()
     {
         if (closing || setupDialogOpen) return;
+        if (settings.DesktopMode)
+        {
+            if (hideAt > 0 && Environment.TickCount64 >= hideAt) HideOverlay();
+            return;
+        }
         try { TryRecoverVrConnection(); }
         catch (Exception error)
         {
@@ -933,6 +977,16 @@ internal sealed partial class MainForm : Form
 
     private void ShowStatus(string message)
     {
+        if (settings.DesktopMode)
+        {
+            try
+            {
+                using var frame = OverlayRenderer.RenderStatus(message);
+                ShowDesktopSubtitle(frame);
+            }
+            catch (Exception ex) { SetStatus(status.Text + " · 桌面字幕显示失败：" + ex.Message); }
+            return;
+        }
         if (!vr.IsConnected || selectionActive || selectionCapture is not null) return;
         try
         {
@@ -968,7 +1022,9 @@ internal sealed partial class MainForm : Form
 
     private void ShowPage()
     {
-        if (pages.Count == 0 || !vr.IsConnected || selectionActive || selectionCapture is not null) return;
+        if (pages.Count == 0 || selectionActive || selectionCapture is not null) return;
+        if (settings.DesktopMode) { ShowDesktopSubtitle(pages[pageIndex]); return; }
+        if (!vr.IsConnected) return;
         if (pagesAnchor is { } anchor)
         {
             if (!vr.IsAnchorValid(anchor)) { ClearPages(); TryAction(HideOverlay); throw new InvalidOperationException("框选位置已失效，请重新拉框。"); }
@@ -981,7 +1037,20 @@ internal sealed partial class MainForm : Form
     }
 
     private void ResetExpiry() => hideAt = overlayAnchor is not null || settings.DisplaySeconds == 0 ? 0 : Environment.TickCount64 + settings.DisplaySeconds * 1000L;
-    private void HideOverlay() { vr.HideOverlay(); overlayVisible = false; overlayGestureId = 0; overlayAnchor = null; hideAt = 0; }
+    private void ShowDesktopSubtitle(Bitmap bitmap)
+    {
+        desktopSubtitle ??= new DesktopSubtitleForm();
+        desktopSubtitle.Present(bitmap);
+        overlayVisible = true;
+        ResetExpiry();
+    }
+
+    private void HideOverlay()
+    {
+        desktopSubtitle?.Hide();
+        if (vr.IsConnected) vr.HideOverlay();
+        overlayVisible = false; overlayGestureId = 0; overlayAnchor = null; hideAt = 0;
+    }
 
     private void ShowDemo()
     {
@@ -989,14 +1058,16 @@ internal sealed partial class MainForm : Form
         sourceText.Text = "Welcome to the world!\r\nPress the button to translate what you see.";
         translatedText.Text = "欢迎来到这个世界！\r\n按下按键，即可翻译眼前的文字。\r\n\r\n这是显示测试，没有调用 AI 服务。";
         TryAction(() => SetPages(OverlayRenderer.RenderPages(translatedText.Text)));
-        SetStatus(vr.IsConnected ? "测试文字已发送到 VR 叠层。" : "桌面示例已显示。连接 SteamVR 后可测试头显中的叠层。");
+        SetStatus(settings.DesktopMode ? "测试文字已显示在桌面字幕中。" :
+            vr.IsConnected ? "测试文字已发送到 VR 叠层。" : "桌面示例已显示。连接 SteamVR 后可测试头显中的叠层。");
     }
 
     protected override void WndProc(ref Message m)
     {
-        if (m.Msg == 0x0312 && !closing && !setupDialogOpen)
+        // A native file picker disables its owner too. Avoid capturing an open dialog.
+        if (m.Msg == 0x0312 && !closing && !setupDialogOpen && IsWindowEnabled(m.HWnd))
         {
-            switch (m.WParam.ToInt32())
+            switch (hotkeys?.ActionFor(m.WParam.ToInt32()))
             {
                 case Hotkeys.Translate: _ = CaptureAndTranslate(false, "键盘快捷键"); break;
                 case Hotkeys.Next: ChangePage(1); break;
@@ -1008,6 +1079,9 @@ internal sealed partial class MainForm : Form
     }
 
     protected override bool ShowWithoutActivation => demo;
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindowEnabled(IntPtr window);
 
     private void OnClosing(object? sender, FormClosingEventArgs e)
     {
@@ -1026,7 +1100,7 @@ internal sealed partial class MainForm : Form
     {
         if (disposedServices) return;
         disposedServices = true;
-        pollTimer.Dispose(); tray.Dispose(); vr.Dispose(); ocr.Dispose(); localJapaneseOcr.Dispose(); translator.Dispose();
+        pollTimer.Dispose(); tray.Dispose(); desktopSubtitle?.Dispose(); vr.Dispose(); ocr.Dispose(); localJapaneseOcr.Dispose(); translator.Dispose();
         selectionFrame?.Dispose(); selectionFrame = null;
         foreach (var page in pages) page.Dispose(); preview.Image?.Dispose();
     }

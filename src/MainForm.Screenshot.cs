@@ -17,7 +17,7 @@ internal sealed partial class MainForm
             DefaultExt = "png",
             AddExtension = true,
             OverwritePrompt = true,
-            FileName = $"VR截图-{DateTime.Now:yyyyMMdd-HHmmss}.png"
+            FileName = $"{(settings.DesktopMode ? "桌面" : "VR")}截图-{DateTime.Now:yyyyMMdd-HHmmss}.png"
         };
         if (dialog.ShowDialog(this) != DialogResult.OK) return;
         snapshot.Save(dialog.FileName, ImageFormat.Png);

@@ -20,7 +20,8 @@ internal sealed class SelectionCaptureSnapshot
     }
 }
 
-internal readonly record struct CaptureRequest(bool OcrOnly, string Source, long GestureId = 0, SelectionCaptureSnapshot? Selection = null);
+internal readonly record struct CaptureRequest(bool OcrOnly, string Source, long GestureId = 0,
+    SelectionCaptureSnapshot? Selection = null, Bitmap? DesktopImage = null, DateTime? CapturedAt = null);
 
 /// <summary>
 /// UI-thread request ownership with one pending slot. New requests replace queued
@@ -35,6 +36,8 @@ internal sealed class LatestCaptureRequests
 
     public bool Enqueue(CaptureRequest request)
     {
+        // The slot owns its desktop bitmap until TryTake transfers ownership to the pipeline.
+        CancelPending();
         pending = request;
         if (running) return false;
         running = true;
@@ -53,25 +56,29 @@ internal sealed class LatestCaptureRequests
         return true;
     }
 
-    public void CancelPending() => pending = null;
+    public void CancelPending()
+    {
+        pending?.DesktopImage?.Dispose();
+        pending = null;
+    }
 
     public bool CancelPending(long gestureId)
     {
         if (gestureId == 0 || pending?.GestureId != gestureId) return false;
-        pending = null;
+        CancelPending();
         return true;
     }
 
     public bool CancelSpatialPending()
     {
         if (pending?.Selection is null) return false;
-        pending = null;
+        CancelPending();
         return true;
     }
 
     public void Finish()
     {
-        pending = null;
+        CancelPending();
         running = false;
     }
 }

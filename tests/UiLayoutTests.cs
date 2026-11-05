@@ -11,6 +11,7 @@ public static class UiLayoutTests
             try
             {
                 Application.SetHighDpiMode(HighDpiMode.PerMonitorV2);
+                WindowChromeTests.Run();
                 using var form = new MainForm(true);
                 form.StartPosition = FormStartPosition.Manual;
                 form.Location = new Point(-20000, -20000);

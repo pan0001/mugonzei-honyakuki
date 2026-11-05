@@ -19,7 +19,6 @@ internal sealed partial class MainForm
         SettingRow(creditSettingsCard, "服务地址", creditServer);
         SettingRow(creditSettingsCard, "账号管理", creditAccountButton);
         SettingRow(creditSettingsCard, "", creditBalanceNote);
-        SettingRow(creditSettingsCard, "使用说明", Note("填写运营者提供的服务地址，在「账号与积分」注册或登录。购买后返回刷新余额。\n本机地址用于本地测试；正式收款需要先部署并配置服务端。自备 Codex / API / Google 不消耗此处积分。"));
         creditAccountButton.Click += (_, _) => TryAction(OpenCreditAccount);
     }
 
@@ -37,6 +36,13 @@ internal sealed partial class MainForm
         {
             vr.ResetTranslationInput();
             TryAction(HideHoldOverlay);
+            var draft = ReadSettingsDraft();
+            if (Program.NeedsAccountSignIn(draft, new CreditSessionStore().Load))
+            {
+                using var login = new SetupWizardForm(draft, SaveSettings, firstRun: false, startAtLogin: true);
+                if (login.ShowDialog(this) == DialogResult.OK) LoadSettings();
+                return;
+            }
             using var account = new CreditAccountForm(creditServer.Text.Trim());
             account.ShowDialog(this);
             // The server selection remains a settings draft until the user saves it.

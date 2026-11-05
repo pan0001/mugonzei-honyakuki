@@ -16,6 +16,8 @@ public static class SetupWizardTests
         {
             try
             {
+                CreditSetupLoginTests.Run();
+                StartupAccountRouting();
                 FirstRunRecommendedDefaults();
                 ReopenedServicesKeepSettings();
                 CancelKeepsFirstRun();
@@ -177,6 +179,27 @@ public static class SetupWizardTests
             "Canceling after advancing a step also leaves first-run setup pending");
     }
 
+    private static void StartupAccountRouting()
+    {
+        var settings = new AppSettings { TranslationBackend = "Credits" };
+        bool Needs(Func<string, CreditSession?> load) => SteamVrTranslator.Program.NeedsAccountSignIn(settings, load);
+        Check(Needs(_ => null) && Needs(_ => new CreditSession("t", "tester", DateTimeOffset.UtcNow.AddMinutes(-1), null)),
+            "Old account setups without a usable session open the standalone sign-in step");
+        Check(!Needs(_ => new CreditSession("t", "tester", DateTimeOffset.UtcNow.AddMinutes(15), null)), "An existing login continues to the workspace");
+        settings.TranslationBackend = "Codex";
+        Check(!Needs(_ => throw new Exception("Must not read account state")), "Non-account setups never ask for an account");
+    }
+
+    internal static void SubmitFixtureLogin(SetupWizardForm wizard)
+    {
+        Named<TextBox>(wizard, "wizardLoginUsername").Text = "fixture-user";
+        Named<TextBox>(wizard, "wizardLoginPassword").Text = "fixture-password";
+        Named<Button>(wizard, "wizardLoginSubmit").PerformClick();
+        var limit = Environment.TickCount64 + 1500;
+        while (wizard.CurrentStep == 1 && Environment.TickCount64 < limit) { Application.DoEvents(); Thread.Sleep(2); }
+        Check(wizard.CurrentStep == 2, "Successful sign-in automatically opens the mode picker");
+    }
+
     private static void FirstRunRecommendedDefaults()
     {
         var original = new AppSettings();
@@ -193,32 +216,24 @@ public static class SetupWizardTests
             && !Named<TextBox>(wizard, "wizardTargetLanguage").Visible,
             "Service selection does not expose the second step's recognition fields");
         AssertSettingsEqual(before, original, "First-run recommendations never mutate the caller's settings");
-        Named<TextBox>(wizard, "wizardTargetLanguage").Text = "";
-        Check(wizard.TryAdvance() && wizard.CurrentStep == 1,
-            "The first step does not validate hidden recognition or language fields");
-        Check(!wizard.TryAdvance() && wizard.CurrentStep == 1 && wizard.LastError.Length > 0,
-            "The service step validates the target language before confirmation");
-        Named<TextBox>(wizard, "wizardTargetLanguage").Text = before.TargetLanguage;
-        var account = Named<Button>(wizard, "wizardOpenAccount");
-        Check(account.Visible && account.Enabled && Named<Label>(wizard, "wizardAccountStatus").Visible,
-            "Account access and a local status are available without opening a session or connecting");
-        var advanced = Named<CheckBox>(wizard, "wizardCreditAdvanced");
-        var address = Named<TextBox>(wizard, "wizardCreditServerUrl");
-        Check(!advanced.Checked && !address.Visible, "The recommended public address starts behind advanced settings");
-        advanced.Checked = true;
-        Check(address.Visible && address.Text == "https://api.mugonzei.top", "Advanced settings expose the recommended address");
-        address.Text = "https://staging-credit.invalid";
-        advanced.Checked = false;
-        Check(wizard.ReadSettingsDraft().CreditServerUrl == "https://api.mugonzei.top" && !address.Visible,
-            "Switching off a custom server restores the official account destination");
-        advanced.Checked = true;
-        Check(address.Text == "https://staging-credit.invalid", "Reopening custom server settings restores its unsaved draft");
-        advanced.Checked = false;
-        Check(wizard.TryAdvance(), "Correcting the target language clears the validation failure");
-        wizard.GoBack();
+        Check(wizard.TryAdvance() && wizard.CurrentStep == 1, "Account service opens its own login step");
         SavePreview(wizard, "setup-credits-preview.png");
-        Check(wizard.TryAdvance() && wizard.TryFinish() && saved is not null,
-            "The recommended configuration can be saved without login, network access or VR");
+        Check(!wizard.TryAdvance() && !wizard.TryFinish() && saved is null, "Account sign-in cannot be skipped");
+        Check(!Named<ComboBox>(wizard, "wizardProcessingMode").Visible && !Named<TextBox>(wizard, "wizardTargetLanguage").Visible
+            && !Named<Button>(wizard, "wizardNext").Visible && Named<Button>(wizard, "wizardLoginSubmit").Visible
+            && !Descendants(wizard).Any(c => c.Visible && (c.Text.Contains("兑换") || c.Text.Contains("充值"))),
+            "Sign-in exposes no billing, recognition, or second submit control");
+        SubmitFixtureLogin(wizard);
+        Check(Named<RadioButton>(wizard, "wizardDesktop").Visible && !Named<CheckBox>(wizard, "wizardControllerEnabled").Visible,
+            "Desktop mode shows the hotkey without headset controls");
+        Named<RadioButton>(wizard, "wizardSteamVr").Checked = true;
+        Check(!wizard.ReadSettingsDraft().DesktopMode && Named<CheckBox>(wizard, "wizardControllerEnabled").Visible, "SteamVR mode restores controller options");
+        Named<RadioButton>(wizard, "wizardDesktop").Checked = true;
+        SavePreview(wizard, "setup-screen-preview.png");
+        wizard.GoBack();
+        Check(wizard.CurrentStep == 0 && wizard.TryAdvance() && wizard.CurrentStep == 2,
+            "Returning to the same authenticated service does not ask for credentials again");
+        Check(wizard.TryFinish() && saved is { DesktopMode: true }, "Save persists the explicitly selected desktop runtime");
         Check(saved!.TranslationBackend == "Credits" && saved.CreditServerUrl == draft.CreditServerUrl
             && saved.ProcessingMode == "Handwriting", "The saved first-run draft retains the recommended destination and mode");
         AssertSettingsEqual(before, original, "Finishing initial setup leaves the caller's original settings intact");
@@ -238,10 +253,13 @@ public static class SetupWizardTests
             AssertSettingsEqual(initial, wizard.ReadSettingsDraft(), "Reopening preserves every provider's original settings: " + service);
             Check(wizard.TryAdvance(), "Reopened settings reach their own service configuration");
             if (service == "Credits")
-                Check(Named<CheckBox>(wizard, "wizardCreditAdvanced").Checked
-                    && Named<TextBox>(wizard, "wizardCreditServerUrl").Visible,
-                    "An existing custom credit destination is expanded and never silently replaced");
-            Check(wizard.TryAdvance() && wizard.TryFinish() && saved is not null, "Reopened settings can be saved without contacting services");
+            {
+                Check(Named<Label>(wizard, "wizardCustomLoginOrigin").Text.Contains(initial.CreditServerUrl)
+                    && !Named<Control>(wizard, "wizardLoginRegister").Visible, "A custom service is identified and never offers official registration");
+                SubmitFixtureLogin(wizard);
+            }
+            else Check(wizard.TryAdvance(), "Other services do not require account sign-in");
+            Check(wizard.TryFinish() && saved is not null, "Reopened setup persists the deliberate choice");
             AssertSettingsEqual(initial, saved!, "Saving reopened setup preserves all fields, including hidden credentials: " + service);
         }
     }
@@ -250,7 +268,7 @@ public static class SetupWizardTests
     {
         using var fixture = new SettingsFixture();
         int saves = 0;
-        using var wizard = Create(new AppSettings(), _ => { saves++; throw new IOException("Synthetic write denied"); });
+        using var wizard = Create(new AppSettings { TranslationBackend = "Codex" }, _ => { saves++; throw new IOException("Synthetic write denied"); }, firstRun: false);
         Show(wizard);
         AdvanceToFinish(wizard);
         Check(!wizard.TryFinish(), "A failed persistence callback cannot complete setup");
@@ -541,7 +559,13 @@ public static class SetupWizardTests
         (target.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new MissingMethodException(target.GetType().Name, name)).Invoke(target, arguments);
 
-    private static SetupWizardForm Create(AppSettings initial, Action<AppSettings> save, bool firstRun = true) => new(initial, save, firstRun, loadSession: _ => null)
+    internal static Task<CreditSession> FixtureLogin(string endpoint, string username, string password, CancellationToken token)
+    {
+        _ = CreditServiceClient.NormalizeServerUrl(endpoint);
+        return Task.FromResult(new CreditSession("synthetic", username, DateTimeOffset.UtcNow.AddHours(1), null));
+    }
+
+    private static SetupWizardForm Create(AppSettings initial, Action<AppSettings> save, bool firstRun = true) => new(initial, save, firstRun, authenticate: FixtureLogin)
     {
         StartPosition = FormStartPosition.Manual,
         Location = new Point(-20000, -20000),

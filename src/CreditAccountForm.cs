@@ -51,6 +51,7 @@ public sealed class CreditAccountForm : Form
         redemptionCode.PlaceholderText = "MU- 后接 8 组四位字符；粘贴运营者提供的兑换码";
         redemptionCode.MaxLength = 128; redemptionCode.UseSystemPasswordChar = true;
         BuildUi();
+        WindowChrome.Apply(this);
         email.TextChanged += (_, _) => { verificationCode.Clear(); UpdateRegistrationControls(); };
         verificationCode.TextChanged += (_, _) => UpdateRegistrationControls();
         resendTimer.Tick += (_, _) => UpdateRegistrationControls();
