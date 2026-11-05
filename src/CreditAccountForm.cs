@@ -7,6 +7,13 @@ public sealed class CreditAccountForm : Form
 {
     private readonly Func<string, CreditServiceClient> createClient;
     private readonly TextBox endpoint = Input("creditAccountServer"), username = Input("creditUsername"), password = Input("creditPassword");
+    private readonly TextBox email = Input("creditRegistrationEmail"), verificationCode = Input("creditRegistrationCode");
+    private readonly TableLayoutPanel registrationFields = Stack();
+    private readonly System.Windows.Forms.Timer resendTimer = new() { Interval = 500 };
+    private Button sendCode = null!, submitAuth = null!, switchAuth = null!;
+    private bool registering;
+    private long resendAfter;
+    private string? codeRequestedFor, resendAddress;
     private readonly TextBox redemptionCode = Input("creditRedemptionCode");
     private readonly Label status = Note("登录后可查看余额、购买次数包和恢复最近译文。"), balance = Note("尚未刷新账户");
     private readonly ComboBox plans = new UiComboBox { Name = "creditPlans", DropDownStyle = ComboBoxStyle.DropDownList, Dock = DockStyle.Fill };
@@ -37,9 +44,16 @@ public sealed class CreditAccountForm : Form
         StartPosition = FormStartPosition.CenterParent;
         endpoint.Text = ServerUrl; password.UseSystemPasswordChar = true;
         username.PlaceholderText = "3–32 位字母、数字、下划线或连字符"; password.PlaceholderText = "10–128 个字符；密码不会保存到本机";
+        email.PlaceholderText = "name@example.com"; email.MaxLength = 254;
+        email.AccessibleName = "注册邮箱"; verificationCode.AccessibleName = "邮箱验证码";
+        verificationCode.PlaceholderText = "邮件中的 6 位数字"; verificationCode.MaxLength = 6;
+        verificationCode.UseSystemPasswordChar = true;
         redemptionCode.PlaceholderText = "MU- 后接 8 组四位字符；粘贴运营者提供的兑换码";
         redemptionCode.MaxLength = 128; redemptionCode.UseSystemPasswordChar = true;
         BuildUi();
+        email.TextChanged += (_, _) => { verificationCode.Clear(); UpdateRegistrationControls(); };
+        verificationCode.TextChanged += (_, _) => UpdateRegistrationControls();
+        resendTimer.Tick += (_, _) => UpdateRegistrationControls();
         FormClosing += (_, _) => { closing = true; _ = CancelLifetimeAsync(); };
     }
 
@@ -82,12 +96,22 @@ public sealed class CreditAccountForm : Form
     private void BuildAccountTab(TabControl tabs)
     {
         var page = Page(tabs, "登录与余额"); var stack = Stack(); page.Controls.Add(stack);
-        Add(stack, Note("仅向上方服务发送用户名和密码。登录令牌按服务地址分别加密保存；更换地址不会转发原令牌。"));
+        Add(stack, Note("已有账号用用户名和密码登录。新账号需验证邮箱。"));
         Add(stack, Note("用户名 · 3–32 位英文字母、数字、下划线或短横线")); Add(stack, Frame(username));
         Add(stack, Note("密码 · 10–128 个字符，不保存到本机")); Add(stack, Frame(password));
+        Add(registrationFields, Note("注册邮箱"));
+        var delivery = new TableLayoutPanel { AutoSize = true, Dock = DockStyle.Top, ColumnCount = 2, Margin = Padding.Empty };
+        delivery.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100)); delivery.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        delivery.Controls.Add(Frame(email), 0, 0);
+        sendCode = ActionButton("发送验证码", RequestCode);
+        sendCode.Name = "creditSendEmailCode"; delivery.Controls.Add(sendCode, 1, 0);
+        Add(registrationFields, delivery);
+        Add(registrationFields, Note("邮箱验证码 · 10 分钟内有效")); Add(registrationFields, Frame(verificationCode));
+        Add(stack, registrationFields); registrationFields.Visible = false;
         var actions = Flow();
-        actions.Controls.Add(ActionButton("登录", () => Authenticate(false), primary: true));
-        actions.Controls.Add(ActionButton("注册", () => Authenticate(true)));
+        submitAuth = ActionButton("登录", Authenticate, primary: true); submitAuth.Name = "creditAuthSubmit";
+        switchAuth = ActionButton("注册新账户", () => { SetRegistrationMode(!registering); return Task.CompletedTask; });
+        switchAuth.Name = "creditAuthSwitch"; actions.Controls.Add(submitAuth); actions.Controls.Add(switchAuth);
         actions.Controls.Add(ActionButton("退出登录", Logout));
         actions.Controls.Add(ActionButton("清除本地登录", () => { EnsureClient().ClearLocalSession(); ClearDisplays(); status.Text = "本地登录已清除。服务器上的会话将按其有效期失效。"; return Task.CompletedTask; }));
         Add(stack, actions); Add(stack, balance);
@@ -153,19 +177,79 @@ public sealed class CreditAccountForm : Form
         if (changed != ServerUrl)
         {
             client?.Dispose(); client = null; ServerUrl = changed; password.Clear(); ClearDisplays();
+            ResetRegistration();
             pendingOrderRequest = null; pendingPlan = null;
         }
         endpoint.Text = ServerUrl;
         status.Text = "服务地址已应用。请登录或刷新已有登录；此操作没有连接服务。";
     }
 
-    private async Task Authenticate(bool register)
+    private void SetRegistrationMode(bool create)
+    {
+        registering = create;
+        registrationFields.Visible = create;
+        submitAuth.Text = create ? "验证并注册" : "登录";
+        switchAuth.Text = create ? "返回登录" : "注册新账户";
+        if (!create) { verificationCode.Clear(); email.Clear(); }
+        status.Text = create ? "输入邮箱并点击“发送验证码”，然后填写收到的 6 位数字。" : "使用已有账号的用户名和密码登录。";
+        UpdateRegistrationControls();
+    }
+
+    private async Task RequestCode()
+    {
+        var service = EnsureClient();
+        string address = email.Text.Trim();
+        try { await service.RequestRegistrationCodeAsync(address, lifetime.Token); }
+        catch (CreditServiceException error) when (!closing && error.StatusCode == System.Net.HttpStatusCode.TooManyRequests)
+        { StartResendCooldown(address); throw; }
+        if (closing) return;
+        codeRequestedFor = address;
+        StartResendCooldown(address);
+        verificationCode.Clear();
+        status.Text = "请查看收件箱或垃圾邮件，填写最新验证码。验证码 10 分钟内有效。";
+    }
+
+    private void StartResendCooldown(string address)
+    {
+        resendAddress = address;
+        resendAfter = Environment.TickCount64 + 60_000;
+        resendTimer.Start();
+        UpdateRegistrationControls();
+    }
+
+    private void UpdateRegistrationControls()
+    {
+        string address = email.Text.Trim();
+        int seconds = (int)Math.Clamp((resendAfter - Environment.TickCount64 + 999) / 1000, 0, 60);
+        if (seconds == 0) resendTimer.Stop();
+        bool waiting = seconds > 0 && string.Equals(resendAddress, address, StringComparison.OrdinalIgnoreCase);
+        sendCode.Text = waiting ? $"重新发送（{seconds} 秒）" : "发送验证码";
+        sendCode.Enabled = !working && !waiting && address.Length > 0;
+        submitAuth.Enabled = !working && (!registering || (codeRequestedFor is not null
+            && string.Equals(codeRequestedFor, address, StringComparison.OrdinalIgnoreCase)
+            && verificationCode.Text.Length == 6 && verificationCode.Text.All(char.IsAsciiDigit)));
+    }
+
+    private void ResetRegistration()
+    {
+        codeRequestedFor = resendAddress = null;
+        resendAfter = 0;
+        SetRegistrationMode(false);
+    }
+
+    private async Task Authenticate()
     {
         var service = EnsureClient();
         CreditSession session;
-        try { session = register ? await service.RegisterAsync(username.Text, password.Text, lifetime.Token) : await service.LoginAsync(username.Text, password.Text, lifetime.Token); }
-        finally { password.Clear(); }
+        try
+        {
+            session = registering
+                ? await service.RegisterAsync(username.Text, password.Text, email.Text, verificationCode.Text, lifetime.Token)
+                : await service.LoginAsync(username.Text, password.Text, lifetime.Token);
+        }
+        finally { if (!closing && !registering) password.Clear(); }
         if (closing) return;
+        password.Clear(); ResetRegistration();
         ClearDisplays(); username.Text = session.Username; pendingOrderRequest = null; pendingPlan = null;
         status.Text = "登录成功，正在读取账户…";
         await RefreshAll();
@@ -359,7 +443,8 @@ public sealed class CreditAccountForm : Form
     private void SetBusy(bool value)
     {
         foreach (var button in actionButtons) button.Enabled = !value;
-        endpoint.Enabled = username.Enabled = password.Enabled = redemptionCode.Enabled = plans.Enabled = !value;
+        endpoint.Enabled = username.Enabled = password.Enabled = email.Enabled = verificationCode.Enabled = redemptionCode.Enabled = plans.Enabled = !value;
+        UpdateRegistrationControls();
     }
 
     protected override void Dispose(bool disposing)
@@ -367,6 +452,7 @@ public sealed class CreditAccountForm : Form
         if (disposing && !resourcesDisposed)
         {
             resourcesDisposed = true; closing = true;
+            resendTimer.Dispose();
             var pendingCancellation = CancelLifetimeAsync();
             var ownedClient = client; client = null;
             _ = DisposeAfterCancellation(pendingCancellation, ownedClient, lifetime);

@@ -88,7 +88,7 @@ if (-not $SkipTests) {
     & $DotnetPath run --project tests\SteamVrTranslator.Tests.csproj -c Release
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
     & $DotnetPath run --project tests\SteamVrTranslator.Tests.csproj -c Release --no-build -- --credits-e2e `
-        (Join-Path $PSScriptRoot 'server/bin/Release/net10.0/Mugonzei.Server.dll') (Get-Command $DotnetPath).Source
+        (Join-Path $PSScriptRoot 'server.tests/bin/Release/net10.0/Mugonzei.Server.Tests.dll') (Get-Command $DotnetPath).Source
     if ($LASTEXITCODE -ne 0) { throw 'Desktop/server credit integration failed.' }
 }
 # Pass the whole MSBuild property as one argument, including spaces/Unicode in the root.

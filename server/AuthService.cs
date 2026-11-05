@@ -12,13 +12,14 @@ public sealed class AuthService(Store store)
     private static readonly byte[] DummySalt = new byte[16];
     private static readonly byte[] DummyHash = new byte[32];
 
-    public AuthReply Register(Credentials input)
+    public AuthReply Register(RegistrationRequest input, RegistrationEmailService verification)
     {
         string username = Normalize(input.Username);
         ValidatePassword(input.Password);
+        var code = verification.VerifyBeforeHashing(input);
         byte[] salt = RandomNumberGenerator.GetBytes(16);
-        byte[] hash = HashPassword(input.Password, salt, Iterations);
-        string userId = store.RegisterUser(username, hash, salt, Iterations);
+        byte[] hash = HashPassword(input.Password!, salt, Iterations);
+        string userId = verification.Register(code, username, hash, salt, Iterations);
         return CreateSession(userId, username);
     }
 

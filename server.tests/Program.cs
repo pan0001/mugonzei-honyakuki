@@ -17,14 +17,16 @@ internal static partial class Program
 {
     private const string Pixel = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1kAAAAASUVORK5CYII=";
     private static int checks;
-    private static async Task<int> Main()
+    private static async Task<int> Main(string[] args)
     {
         try
         {
+            if (args.FirstOrDefault() == "--serve-e2e") return await ServeEmailFixture(args);
             await PaymentAccounting();
             await PaymentVerification();
             RefundAccounting();
-            AuthenticationPersistence();
+            await AuthenticationPersistence();
+            await RegistrationEmailTests();
             await ReservationsAndRecovery();
             await WorkerLifecycle();
             await QueuedCancellationReleasesCapacity();
@@ -64,12 +66,19 @@ internal static partial class Program
         Equal(0L, fixture.Store.GetAccount(other).Balance, "A provider trade cannot fund another user");
     }
 
-    private static void AuthenticationPersistence()
+    private static async Task AuthenticationPersistence()
     {
         using var fixture = new Fixture();
         var auth = new AuthService(fixture.Store);
         var credentials = new Credentials("fixture_user", "synthetic-password-012345");
-        AuthReply registered = auth.Register(credentials);
+        var inbox = new TestMailbox();
+        var clock = new RegistrationClock();
+        var settings = TestEmailOptions();
+        var email = new RegistrationEmailService(fixture.Store, settings, inbox, clock);
+        const string address = "owner@example.test";
+        await email.RequestAsync(address, IPAddress.Loopback, default);
+        var request = new RegistrationRequest(credentials.Username, credentials.Password, address, inbox.LastCode);
+        AuthReply registered = auth.Register(request, email);
         var persisted = new Store(fixture.Path);
         var afterRestart = new AuthService(persisted);
         var context = Context(registered.Token);
@@ -78,7 +87,7 @@ internal static partial class Program
         Equal("fixture_user", persisted.GetAccount(user).Username, "Saved session survives a new service instance");
         Check(!persisted.FindUser("fixture_user")!.PasswordHash.AsSpan().SequenceEqual(Encoding.UTF8.GetBytes(credentials.Password)), "Password is not persisted as plaintext");
         Throws(401, () => afterRestart.Login(credentials with { Password = "wrong-password-012345" }));
-        Throws(409, () => afterRestart.Register(credentials));
+        Throws(400, () => afterRestart.Register(request, new RegistrationEmailService(persisted, settings, inbox, clock)));
         AuthReply loggedIn = afterRestart.Login(credentials);
         Check(registered.Token != loggedIn.Token, "Login issues an independent random session");
         afterRestart.Logout(context);
@@ -363,7 +372,9 @@ internal static partial class Program
     {
         using var fixture = new Fixture();
         var auth = new AuthService(fixture.Store);
-        var login = auth.Register(new("http_fixture", "synthetic-password-12345"));
+        var credentials = new Credentials("http_fixture", "synthetic-password-12345");
+        fixture.LegacyUser(credentials);
+        var login = auth.Login(credentials);
         var context = Context(login.Token); auth.Authenticate(context); string user = AuthService.UserId(context); fixture.Fund(user, 2);
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { EnvironmentName = "Development" });
         builder.WebHost.UseUrls("http://127.0.0.1:0"); builder.Logging.ClearProviders();
@@ -506,9 +517,18 @@ internal static partial class Program
         private readonly string directory = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "Mugonzei-server-tests-" + Guid.NewGuid().ToString("N"));
         public string Path { get; } public Store Store { get; }
         public Fixture() { Path = System.IO.Path.Combine(directory, "fixture.db"); Store = new(Path); }
+        public void LegacyUser(Credentials input)
+        {
+            byte[] salt = RandomNumberGenerator.GetBytes(16);
+            byte[] hash = Rfc2898DeriveBytes.Pbkdf2(input.Password, salt, 210_000, HashAlgorithmName.SHA256, 32);
+            RedemptionSql(Path, "INSERT INTO users(id,username,password_hash,salt,iterations) VALUES($id,$name,$hash,$salt,210000)",
+                ("$id", Guid.NewGuid().ToString("N")), ("$name", input.Username), ("$hash", hash), ("$salt", salt));
+        }
         public string User(int credits = 0)
         {
-            string user = Store.RegisterUser("fixture_" + Guid.NewGuid().ToString("N"), RandomNumberGenerator.GetBytes(32), RandomNumberGenerator.GetBytes(16), 210_000);
+            string user = Guid.NewGuid().ToString("N");
+            RedemptionSql(Path, "INSERT INTO users(id,username,password_hash,salt,iterations) VALUES($id,$name,$hash,$salt,210000)",
+                ("$id", user), ("$name", "fixture_" + user), ("$hash", RandomNumberGenerator.GetBytes(32)), ("$salt", RandomNumberGenerator.GetBytes(16)));
             if (credits > 0) Fund(user, credits); return user;
         }
         public void Fund(string user, int credits)

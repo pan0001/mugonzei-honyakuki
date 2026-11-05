@@ -8,10 +8,11 @@ using SteamVrTranslator;
 
 public static class CreditIntegrationTests
 {
-    public static async Task RunEndToEndAsync(string serverDll, string dotnetPath)
+    public static async Task RunEndToEndAsync(string testHostDll, string dotnetPath)
     {
-        serverDll = Path.GetFullPath(serverDll);
-        if (!File.Exists(serverDll) || !File.Exists(dotnetPath)) throw new Exception("Build the server and supply the SDK dotnet path first.");
+        testHostDll = Path.GetFullPath(testHostDll);
+        if (Path.GetFileName(testHostDll) != "Mugonzei.Server.Tests.dll" || !File.Exists(testHostDll) || !File.Exists(dotnetPath))
+            throw new Exception("Build server.tests and pass Mugonzei.Server.Tests.dll and the SDK dotnet path.");
         string fixture = Path.Combine(Path.GetTempPath(), "mugonzei-credit-e2e-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(fixture);
         using var listener = new TcpListener(IPAddress.Loopback, 0);
@@ -19,7 +20,9 @@ public static class CreditIntegrationTests
         string address = $"http://127.0.0.1:{port}/";
         var start = new ProcessStartInfo(dotnetPath) { WorkingDirectory = fixture, UseShellExecute = false,
             CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true };
-        start.ArgumentList.Add(serverDll); start.ArgumentList.Add("--urls"); start.ArgumentList.Add(address);
+        string inbox = Path.Combine(fixture, "synthetic-inbox.txt");
+        start.ArgumentList.Add(testHostDll); start.ArgumentList.Add("--serve-e2e"); start.ArgumentList.Add(inbox);
+        start.ArgumentList.Add("--urls"); start.ArgumentList.Add(address);
         start.Environment["ASPNETCORE_ENVIRONMENT"] = "Development";
         start.Environment["DOTNET_ENVIRONMENT"] = "Development";
         start.Environment["MUGONZEI_DATABASE"] = Path.Combine(fixture, "synthetic.db");
@@ -52,7 +55,12 @@ public static class CreditIntegrationTests
             Check(ready, "Isolated server starts");
             var sessionStore = new CreditSessionStore(Path.Combine(fixture, "sessions"));
             using var client = new CreditServiceClient(address, sessionStore);
-            await client.RegisterAsync("smoke_user", "Synthetic-only-password-123", deadline.Token);
+            const string syntheticEmail = "smoke@example.test", syntheticPassword = "Synthetic-only-password-123";
+            await client.RequestRegistrationCodeAsync(syntheticEmail, deadline.Token);
+            string emailCode = await File.ReadAllTextAsync(inbox, deadline.Token);
+            await client.RegisterAsync("smoke_user", syntheticPassword, syntheticEmail, emailCode, deadline.Token);
+            await client.LogoutAsync(deadline.Token);
+            await client.LoginAsync("smoke_user", syntheticPassword, deadline.Token);
             Check((await client.GetAccountAsync(deadline.Token)).Balance == 0, "New account starts at zero");
             var plans = await client.GetPlansAsync(deadline.Token);
             Check(plans.Length == 1 && plans[0].Credits == 100, "Client reads the actual server plan schema");
@@ -95,7 +103,7 @@ public static class CreditIntegrationTests
                 && (await recovered.GetAccountAsync(deadline.Token)).Balance == 99,
                 "A delayed submit after cancellation cannot start or charge a new translation");
             await recovered.LogoutAsync(deadline.Token);
-            Console.WriteLine("PASS real client ↔ local server: register/login, checkout confirmation, duplicate payment, mixed text task, recovery, ledger and logout; no real money or AI.");
+            Console.WriteLine("PASS real client ↔ local HTTP server: synthetic inbox verification, registration, password login, checkout, duplicate payment, translation, recovery, ledger and logout.");
         }
         catch
         {

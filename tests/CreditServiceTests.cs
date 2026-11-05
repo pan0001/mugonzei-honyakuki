@@ -16,6 +16,7 @@ public static class CreditServiceTests
         ValidateAddresses();
         ProtectedSessions();
         await AuthenticationAndAccountContract();
+        await EmailDeliveryFailures();
         await RedemptionContract();
         await RecoverWithoutResubmission();
         await MissingAfterDisconnectReusesId();
@@ -68,6 +69,7 @@ public static class CreditServiceTests
 
     private static async Task AuthenticationAndAccountContract()
     {
+        const string email = "synthetic@example.test", code = "012345";
         using var temp = new TemporarySessions();
         int requests = 0; var orderRequest = Guid.NewGuid();
         using var client = Client(temp, async (request, token) =>
@@ -75,12 +77,27 @@ public static class CreditServiceTests
             requests++;
             string path = request.RequestUri!.AbsolutePath;
             Assert(path.StartsWith("/base/v1/", StringComparison.Ordinal), "API keeps configured base path");
+            if (path.EndsWith("/register/email-code"))
+            {
+                Assert(request.Method == HttpMethod.Post && request.RequestUri.Query == "" && request.Headers.Authorization is null,
+                    "verification email is requested without an existing session, query string or login credentials");
+                using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
+                Assert(json.RootElement.EnumerateObject().Count() == 1 && json.RootElement.GetProperty("email").GetString() == email,
+                    "only destination mailbox is submitted to the code endpoint");
+                return new HttpResponseMessage(HttpStatusCode.NoContent);
+            }
             if (path.EndsWith("/login") || path.EndsWith("/register"))
             {
                 Assert(request.Headers.Authorization is null, "credentials request does not reuse a token");
                 using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
                 Equal("tester", json.RootElement.GetProperty("username").GetString(), "username normalized");
                 Equal(Password, json.RootElement.GetProperty("password").GetString(), "password only in login body");
+                if (path.EndsWith("/register"))
+                {
+                    Equal(email, json.RootElement.GetProperty("email").GetString(), "registration supplies the verified mailbox");
+                    Equal(code, json.RootElement.GetProperty("code").GetString(), "leading zero in code preserved");
+                }
+                else Assert(json.RootElement.EnumerateObject().Count() == 2, "existing account login only uses username and password");
                 return Response(new { token = Secret, username = "tester", expiresAt = DateTimeOffset.UtcNow.AddHours(1) });
             }
             Equal(Secret, request.Headers.Authorization?.Parameter, "bound bearer session");
@@ -101,9 +118,16 @@ public static class CreditServiceTests
         });
         Equal(0, requests, "constructor does not connect");
         await ExpectAsync<InvalidOperationException>(() => client.LoginAsync("ab", Password), "3–32");
-        await ExpectAsync<InvalidOperationException>(() => client.RegisterAsync("tester", "short"), "10–128");
+        await ExpectAsync<InvalidOperationException>(() => client.RegisterAsync("tester", "short", email, code), "10–128");
+        foreach (string invalid in new[] { "", "name", "two@example.test,more@example.test", "Fixture <name@example.test>", "bad\r\nX@example.test" })
+            await ExpectAsync<InvalidOperationException>(() => client.RequestRegistrationCodeAsync(invalid), "邮箱");
+        foreach (string invalid in new[] { "", "12345", "1234567", "１２３４５６", "abcd56" })
+            await ExpectAsync<InvalidOperationException>(() => client.RegisterAsync("tester", Password, email, invalid), "6 位");
         Equal(0, requests, "invalid credentials stay local");
-        await client.RegisterAsync("Tester", Password);
+        await client.RequestRegistrationCodeAsync(" " + email + " ");
+        Assert(!Directory.Exists(temp.Path) || Directory.GetFiles(temp.Path).Length == 0,
+            "requesting an email creates no local credential or session");
+        await client.RegisterAsync("Tester", Password, email, code);
         await client.LoginAsync("Tester", Password);
         Equal(10L, (await client.GetAccountAsync()).Balance, "account contract");
         Equal(1, (await client.GetLedgerAsync()).Length, "ledger contract");
@@ -113,6 +137,26 @@ public static class CreditServiceTests
         Equal("order-1", (await client.GetOrderAsync("order-1", true)).Id, "refresh order contract");
         await client.LogoutAsync(); Equal(null, temp.Store.Load(Endpoint), "logout removes local session");
         await ExpectAsync<InvalidOperationException>(() => client.GetAccountAsync(), "登录");
+    }
+
+    private static async Task EmailDeliveryFailures()
+    {
+        using var temp = Authenticated();
+        string stored = Directory.GetFiles(temp.Path).Single();
+        byte[] original = File.ReadAllBytes(stored);
+        foreach (var (status, hint) in new[] { (HttpStatusCode.ServiceUnavailable, "暂时无法发送"),
+            (HttpStatusCode.TooManyRequests, "稍后"), (HttpStatusCode.NotFound, "更新服务端"),
+            (HttpStatusCode.OK, "响应格式") })
+        {
+            using var client = Client(temp, (request, _) =>
+            {
+                Assert(request.Headers.Authorization is null, "email delivery never sends an account token");
+                return Task.FromResult(Response(new { message = Secret }, status));
+            });
+            var failure = await ExpectAsync<CreditServiceException>(() => client.RequestRegistrationCodeAsync("synthetic@example.test"), hint);
+            Assert(!failure.Message.Contains(Secret), "mail delivery failure never discloses raw diagnostics");
+        }
+        Assert(File.ReadAllBytes(stored).AsSpan().SequenceEqual(original), "requesting codes leaves a preexisting session intact");
     }
 
     private static async Task RedemptionContract()

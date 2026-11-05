@@ -50,6 +50,7 @@ public sealed partial class Store
             CREATE INDEX IF NOT EXISTS orders_user_created ON orders(user_id,created_at);
             """);
         InitializeRedemptionSchema(db);
+        InitializeEmailSchema(db);
     }
 
     private SqliteConnection Open()
@@ -73,10 +74,10 @@ public sealed partial class Store
     private static string Id(string value) => Guid.TryParse(value, out var id) ? id.ToString("N")
         : throw new ApiException(400, "invalid_request_id", "请求编号必须为 UUID。");
 
-    public string RegisterUser(string username, byte[] passwordHash, byte[] salt, int iterations)
+    private static string InsertUser(SqliteConnection db, SqliteTransaction? tx, string username, byte[] passwordHash, byte[] salt, int iterations)
     {
-        string id = Guid.NewGuid().ToString("N"); using var db = Open();
-        try { Execute(db, null, "INSERT INTO users(id,username,password_hash,salt,iterations) VALUES($id,$name,$hash,$salt,$iterations)",
+        string id = Guid.NewGuid().ToString("N");
+        try { Execute(db, tx, "INSERT INTO users(id,username,password_hash,salt,iterations) VALUES($id,$name,$hash,$salt,$iterations)",
             ("$id", id), ("$name", username), ("$hash", passwordHash), ("$salt", salt), ("$iterations", iterations)); }
         catch (SqliteException ex) when (ex.SqliteErrorCode == 19)
         { throw new ApiException(409, "username_exists", "该用户名已被使用。"); }
@@ -316,6 +317,7 @@ public sealed partial class Store
     {
         using var db = Open(); using var tx = db.BeginTransaction();
         Execute(db, tx, "DELETE FROM sessions WHERE expires_at <= $now", ("$now", Now()));
+        PruneEmailData(db, tx, DateTimeOffset.UtcNow.ToUnixTimeSeconds());
         Execute(db, tx, """
             UPDATE translations SET input_json='{}',result_json=NULL,error_code='result_expired'
             WHERE updated_at < $before AND status NOT IN ('queued','running') AND (input_json<>'{}' OR result_json IS NOT NULL)

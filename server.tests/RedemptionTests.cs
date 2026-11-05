@@ -294,13 +294,19 @@ internal static partial class Program
             var issued = fixture.Store.CreateRedemptionCodes(12, 2, null, "HTTP synthetic");
             using var unauthenticated = await http.PostAsJsonAsync("v1/redemptions", new { code = issued[0].Code }, deadline.Token);
             Equal(HttpStatusCode.Unauthorized, unauthenticated.StatusCode, "Actual redemption endpoint rejects missing sessions");
-            async Task<AuthReply> Register(string name)
+            using var noEmail = await http.PostAsJsonAsync("v1/auth/register", new Credentials("obsolete_client", "synthetic-registration-password"), deadline.Token);
+            Equal(HttpStatusCode.BadRequest, noEmail.StatusCode, "Legacy registration payload cannot bypass the email challenge");
+            using var noMailer = await http.PostAsJsonAsync("v1/auth/register/email-code", new { email = "fixture@example.test" }, deadline.Token);
+            Equal(HttpStatusCode.ServiceUnavailable, noMailer.StatusCode, "Unconfigured production sender never pretends to deliver email");
+            async Task<AuthReply> LoginLegacy(string name)
             {
-                using var response = await http.PostAsJsonAsync("v1/auth/register", new Credentials(name, "synthetic-redemption-password-123"), deadline.Token);
+                var credentials = new Credentials(name, "synthetic-redemption-password-123");
+                fixture.LegacyUser(credentials);
+                using var response = await http.PostAsJsonAsync("v1/auth/login", credentials, deadline.Token);
                 response.EnsureSuccessStatusCode();
                 return (await response.Content.ReadFromJsonAsync<AuthReply>(deadline.Token))!;
             }
-            AuthReply first = await Register("redeem_http_first"), second = await Register("redeem_http_second");
+            AuthReply first = await LoginLegacy("redeem_http_first"), second = await LoginLegacy("redeem_http_second");
             http.DefaultRequestHeaders.Authorization = new("Bearer", first.Token);
             using var disabledPurchase = await http.PostAsJsonAsync("v1/orders", new { planId = "draft", requestId = Guid.NewGuid() }, deadline.Token);
             Equal(HttpStatusCode.ServiceUnavailable, disabledPurchase.StatusCode, "Hiding draft plans preserves the disabled payment guard on order creation");

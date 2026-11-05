@@ -21,7 +21,7 @@ Linux x64 发行包为 framework-dependent，不包含 .NET 运行时。目标�
 维护者可在仓库根目录用 PowerShell 7 打包既有 publish 目录；脚本不构建或启动服务：
 
 ```powershell
-dotnet publish server/Mugonzei.Server.csproj -c Release -r linux-x64 --self-contained false -p:UseAppHost=false -o dist/Mugonzei-Server-linux-x64-v0.2.1-preview
+dotnet publish server/Mugonzei.Server.csproj -c Release -r linux-x64 --self-contained false -p:UseAppHost=false -o dist/Mugonzei-Server-linux-x64-v0.2.3-preview
 ./tools/package-server-release.ps1
 ```
 
@@ -64,11 +64,13 @@ dotnet run --project server/Mugonzei.Server.csproj
 
 ## HTTP 接口
 
-除注册、登录、计划列表、健康检查和平台回调外，接口使用 `Authorization: Bearer <token>`。密码使用随机 salt 的 PBKDF2-SHA256，校验采用固定时间比较；数据库仅保存会话 token 的 SHA-256 摘要，14 天过期，退出立即撤销当前会话。尚未提供找回密码、邮箱认证或账户删除界面。
+除注册（含发验证码）、登录、计划列表、健康检查和平台回调外，接口使用 `Authorization: Bearer <token>`。密码使用随机 salt 的 PBKDF2-SHA256；数据库仅保存会话 token 的 SHA-256 摘要，14 天过期，退出立即撤销当前会话。新账号必须验证邮箱；已有账号继续用原用户名和密码登录。邮箱验证不提供密码找回或账户删除。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
-| POST | `/v1/auth/register`、`/v1/auth/login` | `{username,password}` → `{token,username,expiresAt}` |
+| POST | `/v1/auth/register/email-code` | `{email}` → `204`，接受发送请求；不返回验证码 |
+| POST | `/v1/auth/register` | `{username,password,email,code}` → `{token,username,expiresAt}`；`code` 是 6 位数字字符串（可以 0 开头） |
+| POST | `/v1/auth/login` | `{username,password}` → `{token,username,expiresAt}`；原有账户不需要邮箱 |
 | POST | `/v1/auth/logout` | 撤销当前会话 |
 | GET | `/v1/account` | `{username,balance,reserved}`，可用积分 = balance − reserved |
 | GET | `/v1/ledger` | 最近 200 条流水 |
@@ -85,6 +87,8 @@ dotnet run --project server/Mugonzei.Server.csproj
 认证错误返回 `{error,message}`，不返回密钥、上游响应正文或原文。注册/登录限每来源 IP 每分钟 10 次，订单操作和翻译提交各限每账户每分钟 20 次，Webhook 限每来源 IP 每分钟 60 次；超过返回 429。翻译上传全局最多 4 个并发，其余立即拒绝，可使用相同请求编号重试；结果轮询不消耗提交配额，取消使用独立的每账户 60 次/分钟配额。认证与支付请求体上限 32 KiB，图片任务另有有界 PNG/base64 限制。
 
 ## 积分兑换码
+
+注册验证码只证明用户能接收该邮箱的邮件，不产生积分；不要将注册验证码提交到下方的兑换接口。
 
 登录后可在网站账户中心或桌面「账号与积分」粘贴运营者发放的码。一个码只能归属一个账户；同一账户再次提交会返回 `alreadyRedeemed=true` 和当前余额，不重复加积分。响应丢失时应使用同一账户重试同一个码。兑换没有手续费，也不调用支付或 AI；积分到账不代表托管翻译已配置。
 

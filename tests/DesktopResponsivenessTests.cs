@@ -10,6 +10,7 @@ public static class DesktopResponsivenessTests
     {
         await OnUiThread(RenderingDoesNotBlockInput);
         await OnUiThread(AccountResponsesAppearIndependently);
+        await OnUiThread(RegistrationKeepsEmailBoundToService);
         await OnUiThread(TargetedRefreshesAvoidUnrelatedRequests);
         await OnUiThread(ClosingDoesNotRunSlowCancellationOnUiThread);
         Console.WriteLine("PASS background subtitle rendering, cancelled bitmap ownership, independent account updates, targeted refreshes and responsive account shutdown");
@@ -96,6 +97,43 @@ public static class DesktopResponsivenessTests
             planGate.TrySetResult(Reply(Array.Empty<object>()));
             try { await refresh; } catch (CreditServiceException) { }
         }
+    }
+
+    private static async Task RegistrationKeepsEmailBoundToService()
+    {
+        using var fixture = new AccountFixture();
+        int sends = 0;
+        using var form = fixture.Form((request, _) =>
+        {
+            Check(request.RequestUri!.AbsolutePath == "/v1/auth/register/email-code", "Only Send contacts the service");
+            sends++;
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.NoContent));
+        });
+        form.StartPosition = FormStartPosition.Manual; form.Location = new Point(-20000, -20000); form.ShowInTaskbar = false;
+        form.Show();
+        var email = Get<TextBox>(form, "email");
+        var code = Get<TextBox>(form, "verificationCode");
+        var send = Get<Button>(form, "sendCode");
+        var submit = Get<Button>(form, "submitAuth");
+        Check(!email.Visible && !code.Visible && submit.Enabled, "Password login stays available without email");
+        Get<Button>(form, "switchAuth").PerformClick();
+        email.Text = "synthetic@example.test"; code.Text = "012345";
+        Check(email.Visible && code.Visible && !submit.Enabled && send.Enabled && sends == 0,
+            "Unverified inputs do not submit registration or contact a server");
+        send.PerformClick();
+        await Until(() => !Get<bool>(form, "working"));
+        Check(!send.Enabled && send.Text.Contains("秒") && code.Text.Length == 0 && sends == 1,
+            "Successful code request starts cooldown and clears any stale code");
+        code.Text = "012345";
+        Check(submit.Enabled && code.UseSystemPasswordChar, "Requested mailbox can submit a pasted six-digit code");
+        email.Text = "different@example.test";
+        Check(!submit.Enabled && code.Text.Length == 0 && send.Enabled, "Changing mailbox clears the code and previous send confirmation");
+        email.Text = "synthetic@example.test"; code.Text = "012345";
+        Check(!send.Enabled && submit.Enabled && sends == 1, "Editing and restoring mailbox does not reset its resend cooldown");
+        Get<TextBox>(form, "endpoint").Text = "https://different-service.invalid/";
+        Invoke(form, "ApplyEndpoint"); Get<Button>(form, "switchAuth").PerformClick();
+        email.Text = "synthetic@example.test"; code.Text = "012345";
+        Check(send.Enabled && !submit.Enabled && sends == 1, "Service change clears previous endpoint's code and confirmation");
     }
 
     private static async Task TargetedRefreshesAvoidUnrelatedRequests()

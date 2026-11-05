@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Mail;
 using System.Text;
 using System.Text.Json;
 
@@ -54,18 +55,69 @@ public sealed class CreditServiceClient : IDisposable
         return payment;
     }
 
-    public Task<CreditSession> RegisterAsync(string username, string password, CancellationToken token = default) => AuthenticateAsync("register", username, password, token);
-    public Task<CreditSession> LoginAsync(string username, string password, CancellationToken token = default) => AuthenticateAsync("login", username, password, token);
+    public async Task RequestRegistrationCodeAsync(string email, CancellationToken token = default)
+    {
+        email = ValidateEmail(email);
+        try
+        {
+            await SendAsync<JsonElement>(HttpMethod.Post, "v1/auth/register/email-code", new { email }, null,
+                token, allowEmpty: true, expectedStatus: HttpStatusCode.NoContent).ConfigureAwait(false);
+        }
+        catch (CreditServiceException error) when (error.StatusCode is HttpStatusCode.NotFound or HttpStatusCode.MethodNotAllowed)
+        { throw new CreditServiceException("此积分服务尚未支持邮箱验证码，请更新服务端或联系运营者。", error.StatusCode); }
+        catch (CreditServiceException error) when (error.StatusCode == HttpStatusCode.ServiceUnavailable)
+        { throw new CreditServiceException("暂时无法发送验证码，请稍后重试或联系运营者。已有账号可直接登录。", error.StatusCode); }
+        catch (CreditServiceException error) when (error.StatusCode == HttpStatusCode.TooManyRequests)
+        { throw new CreditServiceException("验证码发送次数已达限制，请稍后重试。", error.StatusCode); }
+        catch (CreditServiceException error) when (error.StatusCode is null && error.IsTransient)
+        { throw new CreditServiceException("发送结果尚未确认。请先查看收件箱和垃圾邮件，再决定是否重试。", isTransient: true); }
+    }
 
-    private async Task<CreditSession> AuthenticateAsync(string action, string username, string password, CancellationToken token)
+    public async Task<CreditSession> RegisterAsync(string username, string password, string email, string code, CancellationToken token = default)
+    {
+        username = ValidateCredentials(username, password);
+        email = ValidateEmail(email);
+        if (code is not { Length: 6 } || !code.All(char.IsAsciiDigit))
+            throw new InvalidOperationException("请输入邮件中的 6 位数字验证码。");
+        try
+        {
+            return await AuthenticateAsync("register", new { username, password, email, code }, token).ConfigureAwait(false);
+        }
+        catch (CreditServiceException error) when (error.StatusCode == HttpStatusCode.BadRequest)
+        { throw new CreditServiceException("注册信息或验证码无效，请检查邮箱和最新的 6 位验证码。", error.StatusCode); }
+        catch (CreditServiceException error) when (error.StatusCode == HttpStatusCode.Conflict)
+        { throw new CreditServiceException("用户名或邮箱无法用于新账户。已有账号可返回登录。", error.StatusCode); }
+        catch (CreditServiceException error) when (error.StatusCode == HttpStatusCode.ServiceUnavailable)
+        { throw new CreditServiceException("邮箱验证服务暂时不可用，请稍后重试或联系运营者。", error.StatusCode); }
+        catch (CreditServiceException error) when (error.StatusCode is null && error.IsTransient)
+        { throw new CreditServiceException("注册结果尚未确认。请先尝试用刚填写的用户名和密码登录。", isTransient: true); }
+    }
+
+    public Task<CreditSession> LoginAsync(string username, string password, CancellationToken token = default) =>
+        AuthenticateAsync("login", new { username = ValidateCredentials(username, password), password }, token);
+
+    private static string ValidateEmail(string email)
+    {
+        string value = (email ?? "").Trim();
+        if (value.Length is 0 or > 254 || value.Any(c => char.IsWhiteSpace(c) || char.IsControl(c))
+            || !MailAddress.TryCreate(value, out var parsed) || parsed.Address != value || !parsed.Host.Contains('.'))
+            throw new InvalidOperationException("请填写有效的邮箱地址，例如 name@example.com。");
+        return value;
+    }
+
+    private static string ValidateCredentials(string username, string password)
     {
         username = (username ?? "").Trim().ToLowerInvariant();
         if (username.Length is < 3 or > 32 || username.Any(c => !(c is >= 'a' and <= 'z' or >= '0' and <= '9' or '_' or '-')))
             throw new InvalidOperationException("用户名需为 3–32 位英文字母、数字、下划线或连字符。");
         if (string.IsNullOrEmpty(password) || password.Length is < 10 or > 128 || password.Any(char.IsControl))
             throw new InvalidOperationException("密码需为 10–128 个字符，且不能包含换行或控制字符。");
-        var response = await SendAsync<LoginResponse>(HttpMethod.Post, "v1/auth/" + action,
-            new { username = username.Trim(), password }, null, token).ConfigureAwait(false);
+        return username;
+    }
+
+    private async Task<CreditSession> AuthenticateAsync(string action, object credentials, CancellationToken token)
+    {
+        var response = await SendAsync<LoginResponse>(HttpMethod.Post, "v1/auth/" + action, credentials, null, token).ConfigureAwait(false);
         if (response.ExpiresAt <= DateTimeOffset.UtcNow) throw InvalidResponse();
         sessions.Save(ServerUrl, response.Token, response.Username, response.ExpiresAt);
         return sessions.Load(ServerUrl)!;
@@ -241,7 +293,8 @@ public sealed class CreditServiceClient : IDisposable
             throw new InvalidOperationException("图片任务需提供不超过 12 MB 的 PNG 截图。");
     }
 
-    private async Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CreditSession? session, CancellationToken token, bool allowEmpty = false)
+    private async Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CreditSession? session, CancellationToken token,
+        bool allowEmpty = false, HttpStatusCode? expectedStatus = null)
     {
         token.ThrowIfCancellationRequested();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -259,6 +312,7 @@ public sealed class CreditServiceClient : IDisposable
             if (!response.IsSuccessStatusCode)
                 throw new CreditServiceException(StatusMessage(response.StatusCode), response.StatusCode,
                     response.StatusCode is HttpStatusCode.RequestTimeout or HttpStatusCode.TooManyRequests || (int)response.StatusCode >= 500);
+            if (expectedStatus is not null && response.StatusCode != expectedStatus) throw InvalidResponse();
             if (response.Content.Headers.ContentLength > MaxResponseBytes) throw InvalidResponse();
             using var input = await response.Content.ReadAsStreamAsync(timeout.Token).ConfigureAwait(false);
             using var output = new MemoryStream();

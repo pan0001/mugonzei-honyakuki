@@ -25,7 +25,8 @@ const element = id => { if (!elements.has(id)) elements.set(id, new Element()); 
 const document = { getElementById: element, createElement: tag => new Element(tag), createDocumentFragment: () => new Element('fragment') };
 const response = (body, status = 200) => ({ status, ok: status >= 200 && status < 300, json: async () => body });
 let transport = async () => response([]);
-const context = vm.createContext({ document, Intl, Date, URL, AbortController, setTimeout, clearTimeout, crypto, console, fetch: (...args) => transport(...args) });
+class TestDate extends Date { static offset = 0; static now() { return Date.now() + this.offset; } }
+const context = vm.createContext({ document, Intl, Date: TestDate, URL, AbortController, setTimeout, clearTimeout, crypto, console, fetch: (...args) => transport(...args) });
 const source = fs.readFileSync(path.join(__dirname, '..', 'website', 'account.js'), 'utf8');
 // Expose closure entry points only in this in-memory test copy; production
 // source and its account/session state remain unchanged.
@@ -92,7 +93,92 @@ async function main() {
   check(api.getToken() === '', '401 revokes in-memory session');
   check(element('dashboard').hidden && !element('auth-section').hidden, '401 returns to sign-in');
   await redemptionTests();
+  await registrationTests();
   console.log('PASS ' + assertions + ' website account security and workflow assertions');
+}
+
+async function registrationTests() {
+  const click = id => element(id).events.click();
+  const submit = () => element('auth-form').events.submit({ preventDefault() {} });
+  const email = element('register-email');
+  const code = element('register-code');
+  const send = element('send-email-code');
+  const notice = element('verification-message');
+  const mail = 'synthetic@example.invalid';
+  const html = fs.readFileSync(path.join(__dirname, '..', 'website', 'account.html'), 'utf8');
+  check(/id="register-email"[^>]*type="email"[^>]*disabled/.test(html)
+    && /id="register-code"[^>]*inputmode="numeric"[^>]*autocomplete="one-time-code"[^>]*pattern="\[0-9\]\{6\}"[^>]*disabled/.test(html), 'Registration-only fields have native email and six ASCII digit validation');
+  check(['register-email', 'register-code'].every(id => html.includes('label for="' + id + '"'))
+    && /id="verification-message"[^>]*role="status"[^>]*aria-live="polite"/.test(html), 'Email and code have accessible labels and delivery feedback');
+  click('register-tab');
+  check(email.required && code.required && !email.disabled && !code.disabled && !element('verification-fields').hidden, 'Registration enables the two required email controls');
+  let posts = [];
+  let releaseSend;
+  transport = async (path, options) => {
+    posts.push({ path, options });
+    return new Promise(resolve => { releaseSend = resolve; });
+  };
+  email.value = mail; email.events.input();
+  const old = click('send-email-code');
+  await click('send-email-code');
+  await submit();
+  check(posts.length === 1 && send.disabled && element('auth-submit').disabled, 'An in-flight email request prevents duplicate sending or submitting the register form');
+  check(posts[0].path === '/v1/auth/register/email-code' && posts[0].options.method === 'POST'
+    && posts[0].options.body === JSON.stringify({ email: mail }) && !posts[0].options.headers.Authorization, 'Sending a code transmits only the email in an anonymous POST body');
+  code.value = '932188';
+  click('login-tab');
+  check(posts[0].options.signal.aborted && !email.value && !code.value && email.disabled && code.disabled && element('verification-fields').hidden, 'Switching to login aborts delivery and removes registration fields from the form');
+  releaseSend(response(null, 204)); await old;
+  check(notice.hidden && !element('auth-submit').disabled, 'Late send reply cannot change the login screen');
+
+  click('register-tab'); email.value = mail; email.events.input();
+  const wrongAddress = click('send-email-code');
+  email.value = 'next@example.invalid'; email.events.input();
+  check(posts[1].options.signal.aborted && !send.disabled, 'Editing the address aborts the old delivery and allows the corrected address');
+  releaseSend(response(null, 204)); await wrongAddress;
+  check(notice.hidden && !send.disabled, 'A late reply for the previous address never marks the new address as sent');
+  let legacySignupCalls = 0;
+  transport = async path => {
+    if (path === '/v1/auth/register') legacySignupCalls++;
+    return response({}, 200); // Unexpected successful body from an old proxy/host.
+  };
+  await click('send-email-code');
+  code.value = '012345';
+  await submit();
+  check(!legacySignupCalls && notice.dataset.tone === 'error', 'Never register through a legacy service that did not acknowledge delivery with 204');
+  transport = async () => response({ error: 'unavailable', message: 'raw upstream' }, 503);
+  await click('send-email-code');
+  check(notice.dataset.tone === 'error' && notice.textContent.includes('暂时无法发送') && !notice.textContent.includes('raw upstream') && !send.disabled, 'Missing SMTP gives actionable, sanitized feedback and permits retry');
+  transport = async () => ({ ok: false, status: 429, json: async () => { throw new SyntaxError(); } });
+  await click('send-email-code');
+  check(send.disabled && send.textContent.includes('秒后重发') && notice.textContent.includes('稍后'), 'An empty HTTP 429 response starts a local cooldown');
+  TestDate.offset += 61000;
+  let sends = 0;
+  transport = async () => { sends++; return response(null, 204); };
+  email.events.input();
+  await click('send-email-code'); await click('send-email-code');
+  check(sends === 1 && notice.dataset.tone === 'success' && send.disabled && !element('auth-submit').disabled, 'Successful sending enforces one minute between requests but permits submitting the code');
+
+  const secret = 'test-only-password';
+  element('username').value = 'demo_user'; element('password').value = secret; element('confirm-password').value = secret;
+  code.value = '043210';
+  let submitted;
+  transport = async (path, options) => { submitted = { path, body: JSON.parse(options.body) }; return response({ error: 'invalid_email_code', message: 'private' }, 400); };
+  await submit();
+  check(submitted.path === '/v1/auth/register' && submitted.body.email === email.value && submitted.body.code === '043210'
+    && submitted.body.username === 'demo_user' && submitted.body.password === secret && Object.keys(submitted.body).length === 4, 'Registration sends the complete contract and preserves a leading zero');
+  check(!code.value && notice.dataset.tone === 'error' && notice.textContent.includes('重新发送') && !notice.textContent.includes('private'), 'An invalid or expired code is cleared and can be re-entered');
+  code.value = '012345';
+  transport = async path => path === '/v1/auth/register' ? response({ token: 'z'.repeat(43), username: 'demo_user' })
+    : path === '/v1/account' ? response({ username: 'demo_user', balance: 0, reserved: 0 }) : response([]);
+  await submit();
+  check(!element('dashboard').hidden && api.getToken() === 'z'.repeat(43) && !code.value && !email.value
+    && !element('password').value && !element('confirm-password').value, 'Successful registration opens the dashboard and clears the code, email and passwords');
+  api.clearSession(); click('login-tab');
+  element('username').value = 'legacy'; element('password').value = secret;
+  transport = async (path, options) => { submitted = { path, body: JSON.parse(options.body) }; return response({ error: 'invalid_credentials' }, 401); };
+  await submit();
+  check(submitted.path === '/v1/auth/login' && submitted.body.username === 'legacy' && Object.keys(submitted.body).length === 2 && !code.required && !email.required, 'Legacy logins keep the username and password contract');
 }
 
 async function redemptionTests() {

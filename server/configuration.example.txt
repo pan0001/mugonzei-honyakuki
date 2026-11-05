@@ -17,6 +17,16 @@ Translation__TimeoutSeconds=120
 Translation__Concurrency=2
 Translation__QueueCapacity=16
 Translation__Mock=false
+# Registration mail: empty values disable new registration; existing accounts can sign in.
+# Explicit STARTTLS only; use the submission port supported by your provider (not implicit TLS 465).
+MUGONZEI_SMTP_HOST=
+MUGONZEI_SMTP_PORT=587
+MUGONZEI_SMTP_FROM=
+MUGONZEI_SMTP_USERNAME=
+MUGONZEI_SMTP_PASSWORD=
+# Independent random 32-byte key in Base64; keep it in private server configuration.
+MUGONZEI_EMAIL_CODE_KEY=
+MUGONZEI_EMAIL_DAILY_LIMIT=200
 
 # Local-only development: use Development, explicit mock=true, live=false,
 # and a loopback ASPNETCORE_URLS. GET payment pages never add credits;

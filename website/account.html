@@ -38,6 +38,18 @@
             <div class="form-row"><label for="username">用户名</label><input id="username" name="username" autocomplete="username" autocapitalize="none" spellcheck="false" inputmode="text" required minlength="3" maxlength="32" pattern="[A-Za-z0-9_\-]{3,32}" aria-describedby="username-hint"><p class="form-hint" id="username-hint">3–32 位英文字母、数字、下划线或短横线；不区分大小写。</p></div>
             <div class="form-row"><label for="password">密码</label><input id="password" name="password" type="password" autocomplete="current-password" required minlength="10" maxlength="128" aria-describedby="password-hint"><p class="form-hint" id="password-hint">10–128 个字符。</p></div>
             <div class="form-row" id="confirm-row" hidden><label for="confirm-password">再次输入密码</label><input id="confirm-password" name="confirm-password" type="password" autocomplete="new-password" minlength="10" maxlength="128" disabled></div>
+            <div id="verification-fields" hidden>
+              <div class="form-row">
+                <label for="register-email">电子邮箱</label>
+                <div class="email-delivery"><input id="register-email" name="email" type="email" autocomplete="email" autocapitalize="none" spellcheck="false" maxlength="254" disabled><button id="send-email-code" class="button button-ghost button-small" type="button" disabled>发送验证码</button></div>
+              </div>
+              <div class="form-row">
+                <label for="register-code">邮箱验证码</label>
+                <input id="register-code" name="code" type="text" inputmode="numeric" autocomplete="one-time-code" spellcheck="false" pattern="[0-9]{6}" minlength="6" maxlength="6" aria-describedby="verification-hint" disabled>
+                <p class="form-hint" id="verification-hint">输入邮件里的 6 位数字，10 分钟内有效。</p>
+              </div>
+              <p id="verification-message" class="status-message" role="status" aria-live="polite" aria-atomic="true" hidden></p>
+            </div>
             <button id="auth-submit" class="button button-primary" type="submit">登录账户 <span aria-hidden="true">↗</span></button>
           </form>
           <p class="form-hint session-hint">网页登录仅在当前页面有效，刷新或关闭页面后需重新登录。暂不提供自助找回密码，请妥善保存。</p>

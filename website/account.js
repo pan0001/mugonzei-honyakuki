@@ -11,6 +11,10 @@
   let generation = 0;
   let mode = 'login';
   let authBusy = false;
+  let verificationRequest = null;
+  let issuedFor = null;
+  let resendTimer;
+  const resendDeadlines = new Map();
   let logoutBusy = false;
   let refreshBusy = false;
   let dashboardRequest = null;
@@ -31,6 +35,7 @@
   }
 
   function clearSession() {
+    issuedFor = null;
     generation++;
     token = '';
     pendingRequests.clear();
@@ -46,6 +51,9 @@
     for (const id of ['available-balance', 'total-balance', 'reserved-balance']) $(id).textContent = '—';
     $('password').value = '';
     $('confirm-password').value = '';
+    $('register-email').value = '';
+    resendDeadlines.clear();
+    resetVerification();
     refreshBusy = false;
     dashboardRequest = null;
     checkoutBusy = false;
@@ -57,6 +65,7 @@
     $('redemption-form').setAttribute('aria-busy', 'false');
     redemptionMessage();
     authBusy = false;
+    updateSendButton();
     $('auth-submit').disabled = logoutBusy;
     $('auth-submit').textContent = mode === 'register' ? '创建账户 ↗' : '登录账户 ↗';
     authTabs.forEach(tab => { tab.disabled = logoutBusy; });
@@ -64,9 +73,8 @@
     $('dashboard').setAttribute('aria-busy', 'false');
   }
 
-  async function api(path, { method = 'GET', body, authenticated = true } = {}) {
+  async function api(path, { method = 'GET', body, authenticated = true, controller = new AbortController(), expectedStatus } = {}) {
     const requestToken = authenticated ? token : '';
-    const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 25000);
     try {
       const headers = { Accept: 'application/json' };
@@ -76,10 +84,15 @@
         method, headers, body: body === undefined ? undefined : JSON.stringify(body),
         signal: controller.signal, credentials: 'omit', cache: 'no-store', redirect: 'error'
       });
+      if (response.ok && expectedStatus !== undefined && response.status !== expectedStatus)
+        throw new ApiError('此服务尚未支持邮箱验证码。', response.status);
       let data = null;
       if (response.status !== 204) {
         try { data = await response.json(); }
-        catch { throw new ApiError('服务器返回了无法读取的响应，请稍后重试。', response.status); }
+        catch {
+          // A rate limiter or reverse proxy may return an empty error response.
+          if (response.ok) throw new ApiError('服务器返回了无法读取的响应，请稍后重试。', response.status);
+        }
       }
       if (!response.ok) {
         if (response.status === 401 && requestToken && token === requestToken) {
@@ -93,13 +106,85 @@
       return data;
     } catch (error) {
       if (error instanceof ApiError) throw error;
-      if (error.name === 'AbortError') throw new ApiError('连接超时。若正在创建订单，请重试同一方案或查看订单列表，避免重复付款。');
+      if (error.name === 'AbortError') throw new ApiError(path === '/orders' && method === 'POST'
+        ? '连接超时，请重试同一方案或查看订单列表，避免重复付款。'
+        : '连接超时，请稍后重试。');
       throw new ApiError('暂时连接不到服务器，请检查网络后重试。');
     } finally { clearTimeout(timer); }
   }
 
+  function verificationMessage(text = '', tone = 'info') {
+    const node = $('verification-message');
+    node.textContent = text;
+    node.dataset.tone = tone;
+    node.hidden = !text;
+  }
+
+  function updateSendButton() {
+    clearTimeout(resendTimer);
+    const now = Date.now();
+    for (const [email, deadline] of resendDeadlines) {
+      if (deadline <= now) resendDeadlines.delete(email);
+    }
+    const remaining = Math.ceil(((resendDeadlines.get($('register-email').value.trim().toLowerCase()) || now) - now) / 1000);
+    const button = $('send-email-code');
+    button.disabled = mode !== 'register' || authBusy || logoutBusy || !!verificationRequest || remaining > 0;
+    button.textContent = verificationRequest ? '正在发送…' : remaining > 0 ? remaining + ' 秒后重发' : '发送验证码';
+    if (mode === 'register' && remaining > 0 && !$('auth-section').hidden) resendTimer = setTimeout(updateSendButton, 1000);
+  }
+
+  function resetVerification() {
+    verificationRequest?.abort();
+    verificationRequest = null;
+    $('register-code').value = '';
+    verificationMessage();
+    updateSendButton();
+    $('auth-submit').disabled = authBusy || logoutBusy;
+  }
+
+  async function sendEmailCode() {
+    if (mode !== 'register' || authBusy || logoutBusy || verificationRequest) return;
+    const field = $('register-email');
+    const email = field.value.trim();
+    if (!field.reportValidity() || !email) return;
+    const key = email.toLowerCase();
+    if (resendDeadlines.get(key) > Date.now()) return;
+    const request = new AbortController();
+    verificationRequest = request;
+    updateSendButton();
+    $('auth-submit').disabled = true;
+    verificationMessage('正在发送验证码…');
+    try {
+      await api('/auth/register/email-code', { method: 'POST', authenticated: false, body: { email }, controller: request, expectedStatus: 204 });
+      if (verificationRequest !== request) return;
+      issuedFor = { key, expiresAt: Date.now() + 600000 };
+      resendDeadlines.set(key, Date.now() + 60000);
+      $('register-code').value = '';
+      verificationMessage('请查看该邮箱的收件箱或垃圾邮件，输入最新一封邮件里的验证码。', 'success');
+      $('register-code').focus();
+    } catch (error) {
+      if (verificationRequest !== request) return;
+      if (error.status === 429) resendDeadlines.set(key, Date.now() + 60000);
+      const detail = error.status === 429 ? '发送次数较多，请稍后再试。'
+        : [200, 404, 405].includes(error.status) ? '此服务尚未支持邮箱验证码，请联系运营者更新服务端。'
+        : error.status === 400 ? '请输入有效的邮箱地址。'
+        : error.status === 503 ? '验证码邮件暂时无法发送，请稍后再试或联系运营者。'
+        : '未能确认发送结果，请先查看邮箱，再决定是否重发。';
+      verificationMessage(detail, 'error');
+    } finally {
+      if (verificationRequest === request) {
+        verificationRequest = null;
+        updateSendButton();
+        $('auth-submit').disabled = authBusy || logoutBusy;
+      }
+    }
+  }
+
+  $('send-email-code').addEventListener('click', sendEmailCode);
+  $('register-email').addEventListener('input', resetVerification);
+
   function setMode(next) {
-    if (authBusy || logoutBusy) return;
+    if (authBusy || logoutBusy || next === mode) return;
     mode = next;
     const registering = mode === 'register';
     authTabs.forEach((tab, index) => {
@@ -108,14 +193,22 @@
       tab.tabIndex = active ? 0 : -1;
     });
     $('auth-panel').setAttribute('aria-labelledby', registering ? 'register-tab' : 'login-tab');
-    $('auth-title').textContent = registering ? '从这里，开始理解' : '欢迎回来';
-    $('auth-description').textContent = registering ? '创建账户后可在客户端使用同一组登录信息。' : '使用与客户端相同的用户名和密码。';
+    $('auth-title').textContent = registering ? '创建账户' : '欢迎回来';
+    $('auth-description').textContent = registering ? '用邮箱验证码完成注册，之后就能用用户名和密码登录客户端。' : '使用与客户端相同的用户名和密码。';
     $('auth-submit').textContent = registering ? '创建账户 ↗' : '登录账户 ↗';
     $('password').autocomplete = registering ? 'new-password' : 'current-password';
     $('confirm-row').hidden = !registering;
     $('confirm-password').disabled = !registering;
     $('confirm-password').required = registering;
     $('confirm-password').setCustomValidity('');
+    $('confirm-password').value = '';
+    $('register-email').value = '';
+    $('verification-fields').hidden = !registering;
+    for (const field of [$('register-email'), $('register-code')]) {
+      field.disabled = !registering;
+      field.required = registering;
+    }
+    resetVerification();
     message();
   }
 
@@ -133,21 +226,32 @@
 
   $('auth-form').addEventListener('submit', async event => {
     event.preventDefault();
-    if (authBusy || logoutBusy) return;
+    if (authBusy || logoutBusy || verificationRequest) return;
     if (mode === 'register' && $('password').value !== $('confirm-password').value) {
       $('confirm-password').setCustomValidity('两次输入的密码不一致。');
       $('confirm-password').reportValidity();
       return;
     }
     if (!$('auth-form').reportValidity()) return;
+    const body = { username: $('username').value.trim(), password: $('password').value };
+    if (mode === 'register') {
+      body.email = $('register-email').value.trim();
+      if (issuedFor?.key !== body.email.toLowerCase() || issuedFor.expiresAt <= Date.now()) {
+        verificationMessage('请先向当前邮箱发送验证码，再输入邮件中的最新验证码。', 'error');
+        $('send-email-code').focus();
+        return;
+      }
+      body.code = $('register-code').value;
+    }
     authBusy = true;
+    updateSendButton();
     let authGeneration = generation;
     $('auth-submit').disabled = true;
     authTabs.forEach(tab => { tab.disabled = true; });
     $('auth-submit').textContent = mode === 'register' ? '正在创建…' : '正在登录…';
     message();
     try {
-      const reply = await api('/auth/' + mode, { method: 'POST', authenticated: false, body: { username: $('username').value.trim(), password: $('password').value } });
+      const reply = await api('/auth/' + mode, { method: 'POST', authenticated: false, body });
       if (typeof reply?.token !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(reply.token)) throw new ApiError('登录响应无效，请稍后重试。');
       generation++;
       authGeneration = generation;
@@ -156,15 +260,24 @@
       $('confirm-password').value = '';
       $('account-username').textContent = reply.username;
       $('auth-section').hidden = true;
+      issuedFor = null;
+      $('register-email').value = '';
+      resendDeadlines.clear();
+      resetVerification();
       $('dashboard').hidden = false;
       $('dashboard-title').tabIndex = -1;
       $('dashboard-title').focus();
       await loadDashboard();
     } catch (error) {
-      if (authGeneration === generation) message(error.message, 'error');
+      if (authGeneration === generation && error.code === 'invalid_email_code') {
+        $('register-code').value = '';
+        verificationMessage('验证码有误、已过期或尝试过多。请核对最新邮件，或重新发送。', 'error');
+        $('register-code').focus();
+      } else if (authGeneration === generation) message(error.message, 'error');
     } finally {
       if (authGeneration === generation && !logoutBusy) {
         authBusy = false;
+        updateSendButton();
         $('auth-submit').disabled = false;
         authTabs.forEach(tab => { tab.disabled = false; });
         $('auth-submit').textContent = mode === 'register' ? '创建账户 ↗' : '登录账户 ↗';
@@ -469,6 +582,7 @@
     finally {
       logoutBusy = false;
       authBusy = false;
+      updateSendButton();
       $('auth-submit').disabled = false;
       authTabs.forEach(tab => { tab.disabled = false; });
       $('logout').disabled = false;

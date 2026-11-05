@@ -131,6 +131,15 @@ curl -sS -o /dev/null -w '%{http_code}\n' https://api.example.com/v1/account
 
 **回退：** 先停用代理 `systemctl disable --now caddy.service`，恢复应用 `MUGONZEI_TRUSTED_PROXIES=` 并重启 mugonzei，然后用前述 SSH 隧道连接。按原配置恢复 DNS/安全组规则，保留数据库和 `/var/lib/caddy`，不要删除私钥或账户数据。只回退 Caddyfile 时，恢复先前文件、validate 后 reload 即可；配置验证失败不要覆盖仍正常运行的服务。
 
+## 注册邮件与账户存储
+
+网站和桌面端向同一 API 提交注册。此模板把 SQLite 库放在 `/var/lib/mugonzei/mugonzei.db`，由 `mugonzei` 系统用户访问，不在网站静态目录中。数据库及备份包含账户、积分和新账户的邮箱，请限制读取权限。登录密码保存为加盐哈希。Windows 客户端只在 `%LOCALAPPDATA%\SteamVrTranslator\CreditSessions` 保存按服务地址区分、由当前 Windows 用户保护的会话，不保存注册密码或邮件验证码。
+
+1. 准备一个可发送事务邮件的发件地址，按邮件服务商要求验证发信域名。注册邮件只用于验证新账户，使用发信专用 SMTP 凭据。使用阿里云 DirectMail 时，先在[发件地址设置](https://www.alibabacloud.com/help/en/direct-mail/user-guide/setup-sender-addresses)中设置 SMTP 密码，从[地域端点表](https://www.alibabacloud.com/help/en/direct-mail/smtp-endpoints)选择与发件地址一致的端点。该服务支持在 80 端口协商 STARTTLS；本项目不会回退到明文。其他服务请使用其明确支持 STARTTLS 的提交端口，通常是 587；465 的隐式 TLS 不是 STARTTLS。
+2. 在服务器的 `/etc/mugonzei/server.env`（root 所有，权限 0600）填写 `MUGONZEI_SMTP_HOST`、`MUGONZEI_SMTP_PORT`、`MUGONZEI_SMTP_FROM`、`MUGONZEI_SMTP_USERNAME`、`MUGONZEI_SMTP_PASSWORD`。为 `MUGONZEI_EMAIL_CODE_KEY` 单独生成 32 个随机字节的 Base64 字符串，例如在私有终端使用 `openssl rand -base64 32`。不要把密钥放进客户端、Git、命令参数或聊天。更换验证码密钥会使已发出的验证码失效，不影响登录密码。
+3. 先在隔离实例跑完整注册：用运营者自己的收件箱收信，用正确码新建账户，确认错误码、重复使用同一码、仅含用户名密码的直接 API 请求均不能建户。再使用升级前的账户登录，核对余额。联调通过后同步切换后台、网站和客户端。旧版客户端仍可登录已有账户，需要注册时前往更新后的官网。缺少发信配置时，新注册不可用，登录和已有余额不受影响。
+4. 发布前备份数据库，保留旧程序。回滚到未实现邮箱验证的旧服务器前，先在反向代理临时关闭 `POST /v1/auth/register`；否则回滚会重新开放仅凭密码的注册。不要用旧数据库覆盖切换后新增的真实账户和流水。
+
 ## 开放付费充值前的验收
 
 积分翻译与收款独立运行。已有余额可以翻译，不需要为了启用 AI 同时开启收款。从 v0.2.2-preview 起，可以预先写入两档套餐；真实和模拟支付都关闭时，`/v1/plans` 仍返回空数组，创建充值订单也会被拒绝。
