@@ -123,7 +123,7 @@ public sealed class CreditAccountForm : Form
         redemption.Controls.Add(Frame(redemptionCode), 0, 0);
         var redeemButton = ActionButton("兑换积分", Redeem, primary: true); redeemButton.Name = "creditRedeemButton";
         redemption.Controls.Add(redeemButton, 1, 0); Add(stack, redemption);
-        Add(stack, Note("同一兑换码仅入账一次，积分和有效期以服务器核验为准。网页与桌面同账户共享余额；兑换码不会保存在本机。"));
+        Add(stack, Note("一次性码只有一个账号能领，共享码每个账号都可领一次。网页和桌面使用同一账号时共享积分余额。"));
         Add(stack, Note("只有完整翻译成功才扣费；任务运行时可能预留积分。取消和断线后的最终结果以服务端记录为准。\n账户窗口中修改的服务地址会带回主界面，请在主界面保存设置后用于翻译。"));
     }
 

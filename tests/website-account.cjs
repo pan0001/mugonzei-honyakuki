@@ -419,5 +419,6 @@ async function redemptionTests() {
   check(html.includes('label for="redemption-code"') && /id="redemption-message"[^>]*role="status"[^>]*aria-live="polite"/.test(html), 'Redemption input and result have accessible labels/live status');
   const input = html.match(/<input id="redemption-code"[^>]*>/)[0];
   check(input.includes('autocomplete="off"') && input.includes('maxlength="80"') && !/minlength|pattern=/.test(input), 'Web form permits short Unicode redemption phrases and avoids autofill');
+  check(html.includes('一次性码只有一个账号能领，共享码每个账号都可领一次'), 'Account guidance distinguishes globally single-use from per-account claims');
 }
 main().catch(error => { console.error(error.message); process.exitCode = 1; });

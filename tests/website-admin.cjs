@@ -24,13 +24,19 @@ for (const m of html.matchAll(/<([a-z0-9]+)\b([^>]*\bid="([^"]+)"[^>]*)>/gi)) {
   c.hidden=/\bhidden\b/.test(m[2]); c.disabled=/\bdisabled\b/.test(m[2]); dom.set(m[3],c);
 }
 const $=id=>{assert(dom.has(id),'Missing element '+id);return dom.get(id);};
+for(const m of html.matchAll(/<select id="([^"]+)"[^>]*>\s*<option value="([^"]+)"/g)) $(m[1]).value=$(m[1]).defaultValue=m[2];
 for(const m of html.matchAll(/<form id="([^"]+)"[^>]*>([\s\S]*?)<\/form>/g))
   $(m[1]).fields=[...m[2].matchAll(/<(?:input|select)\b[^>]*\bid="([^"]+)"/g)].map(v=>$(v[1]));
 const win=new Control('window');
 const calls=[], token='Fixture-'.repeat(6);
 const plan={id:'starter',name:'小额方案',credits:50,amountFen:3000,afdianPlanId:'a'.repeat(32)};
 const coupon={id:'b'.repeat(32),planId:plan.id,amountFen:1999,afdianPlanId:'d'.repeat(32),expiresAt:'2099-02-01',revokedAt:null};
-const redemption={id:'c'.repeat(32),credits:10,note:'test <img>',status:'active',expiresAt:'2099-02-01'};
+const redemption={id:'c'.repeat(32),credits:10,note:'test <img>',status:'active',mode:'singleUse',claimCount:0,expiresAt:'2099-02-01'};
+let used={...redemption,id:'e'.repeat(32),status:'redeemed',claimCount:1};
+let rejectShare=false;
+const redemptions=()=>[{...redemption,code:'SHOULD-NOT-RENDER'},used,
+  {...redemption,id:'0'.repeat(32),mode:'oncePerAccount',claimCount:7},
+  {...redemption,id:'1'.repeat(32),status:'revoked'}, {...redemption,id:'2'.repeat(32),expiresAt:'2000-01-01',status:'redeemed'}];
 const ok=(data,status=200)=>({ok:status>=200&&status<300,status,json:async()=>data});
 let session=false, summaryOffline=false, couponReply, batchReply, listReply;
 async function transport(url,opts) {
@@ -47,10 +53,15 @@ async function transport(url,opts) {
   if(route==='summary')return summaryOffline?ok({},503):ok({accounts:12,paidOrders:2,paidAmountFen:2587});
   if(route==='plans')return ok([plan]);
   if(opts.method==='GET'&&route==='coupons')return listReply?listReply():ok([{...coupon,code:'SHOULD-NOT-RENDER'}]);
-  if(opts.method==='GET'&&route==='redemptions')return ok([{...redemption,code:'SHOULD-NOT-RENDER'}]);
+  if(opts.method==='GET'&&route==='redemptions')return ok(redemptions());
   if(opts.method==='POST'&&route==='coupons')return couponReply();
   if(opts.method==='POST'&&route==='redemptions')return batchReply();
   if(route.endsWith('/revoke'))return ok({revoked:true});
+  if(route==='redemptions/'+used.id+'/share') {
+    assert.deepEqual(body,{});
+    if(rejectShare)return ok({error:'redemption_share_unavailable'},409);
+    used={...used,mode:'oncePerAccount',status:'active'};return ok(used);
+  }
   throw Error('Unexpected path');
 }
 const document={getElementById:$,createElement:t=>new Control(t)};
@@ -96,15 +107,30 @@ async function tests(){
   await click('redemptionTab');assert(content('redemptionList').includes('test <img>'));assert(!content('redemptionList').includes('SHOULD-NOT-RENDER'));
   const revoke=flatten($('redemptionList')).find(c=>c.tag==='button');revoke.listeners.click();
   assert.equal(posts('redemptions/'+redemption.id+'/revoke').length,0);await click('confirm');assert.equal(posts('redemptions/'+redemption.id+'/revoke').length,1);
+  const shareButtons=()=>flatten($('redemptionList')).filter(c=>c.tag==='button'&&c.textContent==='转为共享码');
+  assert.equal(shareButtons().length,2,'Only current single-use records, including a previously claimed record, offer conversion');
+  assert(content('redemptionList').includes('已领取账号 7'));
+  shareButtons()[1].listeners.click();const sharePath='redemptions/'+used.id+'/share';
+  assert.equal($('confirm').textContent,'确认转为共享码');assert(content('summary').includes('已领取账号保留记录'));
+  await click('back');assert.equal(posts(sharePath).length,0,'Canceling review cannot convert the original credential');
+  shareButtons()[1].listeners.click();rejectShare=true;await click('confirm');
+  assert($('reviewMessage').textContent.includes('过期或停用') && $('review').open);
+  rejectShare=false;await click('confirm');assert.equal(posts(sharePath).length,2);assert.equal(shareButtons().length,1);
+  assert(content('redemptionList').includes('共享码 · 每个账号可领一次 · 已领取账号 1'));
   $('credits').value='10';$('count').value='1';$('count').listeners.input();
   for(const phrase of ['SampleEnglish','中文测试口令']){
+    const shared=phrase==='中文测试口令';$('redemptionMode').value=shared?'oncePerAccount':'singleUse';
     $('redemptionCustomCode').value=phrase; await submit('redemptionForm');
     assert(content('summary').includes('使用已填写的自定义口令')&&!content('summary').includes(phrase));
+    assert.equal(content('summary').includes('实际发放积分随领取账号数增加'),shared);
+    assert.equal(content('summary').includes('积分合计'),!shared);
     batchReply=()=>ok({codes:[{code:phrase}]},201); await click('confirm');
     assert.equal(posts('redemptions').at(-1).body.customCode,phrase);
+    assert.equal(posts('redemptions').at(-1).body.mode,shared?'oncePerAccount':undefined);
     assert.equal($('codes').value,phrase);assert.equal($('redemptionCustomCode').value,'');
     await click('dismissCodes');assert.equal($('codes').value,'');
   }
+  $('redemptionMode').value='singleUse';
   $('redemptionCustomCode').value='SingleOnly';
   $('count').value='2';$('count').listeners.input();
   assert($('redemptionCustomCode').disabled && !$('redemptionCustomCode').value,'Batch selection clears and disables the single-code credential');
@@ -135,6 +161,7 @@ async function browserTest() {
   const http = require('node:http');
   const { chromium } = require('playwright');
   const writes = [];
+  let converted=false;
   const server = http.createServer(async (req,res) => {
     const origin = 'http://127.0.0.1:' + server.address().port;
     const files = {'/admin/':'index.html','/admin/admin.js':'admin.js','/admin/admin.css':'admin.css'};
@@ -158,7 +185,8 @@ async function browserTest() {
       res.end(JSON.stringify({authenticated:req.method==='POST'||auth}));return;
     }
     if(!auth){res.writeHead(401).end('{}');return;}
-    const paths={plans:[plan],coupons:[coupon],redemptions:[redemption],summary:{accounts:2,paidOrders:1,paidAmountFen:1999}};
+    const previous={...redemption,id:'d'.repeat(32),mode:converted?'oncePerAccount':'singleUse',status:converted?'active':'redeemed',claimCount:1};
+    const paths={plans:[plan],coupons:[coupon],redemptions:[previous],summary:{accounts:2,paidOrders:1,paidAmountFen:1999}};
     if(req.method==='POST'&&route==='coupons'){
       assert.match(req.headers['idempotency-key'],/^[a-f0-9-]{36}$/);
       res.writeHead(201).end(JSON.stringify({...coupon,code:'SYNTHETIC-ONCE'}));return;
@@ -167,7 +195,11 @@ async function browserTest() {
       assert.match(req.headers['idempotency-key'],/^[a-f0-9-]{36}$/);
       const chunks=[];for await(const chunk of req)chunks.push(chunk);
       const body=JSON.parse(Buffer.concat(chunks));assert.equal(body.count,1);assert.equal(body.customCode,'测试专用口令');
+      assert.equal(body.mode,'oncePerAccount');
       res.writeHead(201).end(JSON.stringify({codes:[{...redemption,code:body.customCode}]}));return;
+    }
+    if(req.method==='POST'&&route==='redemptions/'+previous.id+'/share'){
+      converted=true;res.end(JSON.stringify({...previous,mode:'oncePerAccount',status:'active'}));return;
     }
     res.end(JSON.stringify(paths[route]));
   });
@@ -177,6 +209,7 @@ async function browserTest() {
     const origin='http://127.0.0.1:'+server.address().port;
     browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH,args:['--disable-background-networking']});
     for(const width of [320,390,1440]){
+      converted=false;
       const page=await browser.newPage({viewport:{width,height:820}});page.setDefaultTimeout(4500);
       page.on('request',request=>assert(request.url().startsWith(origin+'/'),'The admin page only requests local resources'));
       await page.goto(origin+'/admin/');await page.locator('#token').fill(token);
@@ -187,7 +220,10 @@ async function browserTest() {
       await page.locator('#reviewCoupon').click();await page.locator('dialog[open]').waitFor();
       assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth && document.querySelector('dialog').getBoundingClientRect().right<=innerWidth));
       await page.locator('#confirm').click();await page.locator('#codes').waitFor();assert.equal(await page.locator('#codes').inputValue(),'SYNTHETIC-ONCE');
-      await page.locator('#dismissCodes').click();await page.locator('#redemptionTab').click();await page.getByRole('button',{name:'撤销兑换码'}).waitFor();
+      await page.locator('#dismissCodes').click();await page.locator('#redemptionTab').click();
+      await page.getByRole('button',{name:'转为共享码',exact:true}).click();await page.getByRole('button',{name:'确认转为共享码'}).click();
+      await page.locator('#redemptionList').getByText('共享码 · 每个账号可领一次 · 已领取账号 1').waitFor();
+      await page.locator('#redemptionMode').selectOption('oncePerAccount');
       await page.locator('#credits').fill('20');await page.locator('#redemptionCustomCode').fill('draft-phrase');await page.locator('#count').fill('2');
       assert(await page.locator('#redemptionCustomCode').isDisabled());assert.equal(await page.locator('#redemptionCustomCode').inputValue(),'');
       await page.locator('#count').fill('1');await page.locator('#redemptionCustomCode').fill('测试专用口令');
@@ -197,7 +233,7 @@ async function browserTest() {
       await page.locator('#logout').click();await page.locator('#notice').filter({hasText:'已退出管理。'}).waitFor();
       await page.close();
     }
-    assert.equal(writes.length,12);
+    assert.equal(writes.length,15);
     console.log('PASS real Chromium login/create/logout same-origin headers and authenticated layouts at 320/390/1440px');
   }finally{await browser?.close();await new Promise(r=>server.close(r));}
 }

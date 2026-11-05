@@ -36,6 +36,8 @@ internal static partial class Program
             using (var denied = await http.GetAsync(endpoint))
                 Equal(HttpStatusCode.Unauthorized, denied.StatusCode, "Redemption metadata requires an administrator session");
             Equal(HttpStatusCode.Unauthorized, (await Issue(http, batch, key)).Status, "An unauthenticated request cannot issue codes");
+            using (var deniedShare = await http.PostAsJsonAsync(endpoint + "/" + Guid.NewGuid().ToString("N") + "/share", new { }))
+                Equal(HttpStatusCode.Unauthorized, deniedShare.StatusCode, "Changing code eligibility requires an administrator session");
             await Login(http);
             foreach (var invalid in new[] { null, "invalid", Guid.Empty.ToString("D") })
                 Equal(HttpStatusCode.BadRequest, (await Issue(http, batch, invalid)).Status, "Admin issuance requires a nonempty UUID key");
@@ -79,7 +81,7 @@ internal static partial class Program
             using var list = await http.GetAsync(endpoint);
             list.EnsureSuccessStatusCode();
             var result = await list.Content.ReadFromJsonAsync<JsonElement>();
-            var allowed = new[] { "createdAt", "credits", "expiresAt", "id", "note", "redeemedAt", "status" };
+            var allowed = new[] { "claimCount", "createdAt", "credits", "expiresAt", "id", "mode", "note", "redeemedAt", "status" };
             Check(result.GetArrayLength() == 2 && result.EnumerateArray().All(r => r.EnumerateObject().Select(p => p.Name).Order().SequenceEqual(allowed))
                 && list.Headers.CacheControl?.NoStore == true, "List is bounded metadata, with no hash, plaintext code, account ID or email fields");
             Check(!result.GetRawText().Contains(user) && !result.GetRawText().Contains(firstCode) && !result.GetRawText().Contains(secondCode),
@@ -96,8 +98,31 @@ internal static partial class Program
             Check(replay.Status == HttpStatusCode.Conflict && replay.Data.GetProperty("error").GetString() == "redemption_batch_exists"
                 && !replay.Data.TryGetProperty("codes", out _), "Restart and changed parameters cannot reuse a consumed request key");
             Equal(2, fixture.Store.ListRedemptionCodes().Count, "Restart retry issued no additional codes");
+            string batchKey = Guid.NewGuid().ToString("D");
+            var badMode = await Issue(http, new { credits = 3, count = 2, days = 1, mode = "unknown" }, batchKey);
+            Equal(HttpStatusCode.BadRequest, badMode.Status, "Unknown modes cannot silently issue codes with different eligibility");
+            var publicBatch = await Issue(http, new { credits = 3, count = 2, days = 1, mode = "oncePerAccount" }, batchKey);
+            Check(publicBatch.Status == HttpStatusCode.Created && publicBatch.Data.GetProperty("codes").GetArrayLength() == 2,
+                "A valid shared batch can reuse a key from failed validation");
+            foreach (var item in publicBatch.Data.GetProperty("codes").EnumerateArray())
+            {
+                var record = fixture.Store.ListRedemptionCodes().Single(x => x.Id == item.GetProperty("id").GetString());
+                Check(record.Mode == "oncePerAccount" && record.Status == "active" && record.ClaimCount == 0,
+                    "Each newly issued shared code starts active with no claims");
+            }
+            string revokedId = fixture.Store.ListRedemptionCodes().Single(x => x.Status == "revoked").Id;
+            using var inactive = await http.PostAsJsonAsync(endpoint + "/" + revokedId + "/share", new { });
+            Equal(HttpStatusCode.Conflict, inactive.StatusCode, "A revoked individual code cannot be reactivated through promotion");
+            var expired = fixture.Store.CreateRedemptionCodes(9, 1, null, "expired promotion fixture").Single();
+            RedemptionSql(fixture.Path, "UPDATE redemption_codes SET expires_at=$expiry WHERE id=$id",
+                ("$expiry", DateTimeOffset.UtcNow.AddDays(-1).ToString("O")), ("$id", expired.Id));
+            using var past = await http.PostAsJsonAsync(endpoint + "/" + expired.Id + "/share", new { });
+            Check(past.StatusCode == HttpStatusCode.Conflict
+                && (await past.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString() == "redemption_share_unavailable",
+                "Expired individual codes cannot start a public campaign");
         });
         await CustomAdminRedemptions();
+        await SharedRedemptionTests();
     }
 
     private static async Task CustomAdminRedemptions()
@@ -165,6 +190,23 @@ internal static partial class Program
             Equal(HttpStatusCode.Created, (await Issue("MugonzeiTest17")).Status, "An ordinary MU-prefixed word is valid outside the legacy shape");
             var english = await Redeem("mugonzeitest17");
             Equal(34L, english.GetProperty("balance").GetInt64(), "ASCII custom codes accept lowercase input through the public endpoint");
+            string promote = path + "/" + issued.Data.GetProperty("codes")[0].GetProperty("id").GetString() + "/share";
+            using (var invalid = await http.PostAsJsonAsync(promote, new { credits = 1000 }))
+                Equal(HttpStatusCode.BadRequest, invalid.StatusCode, "Promotion rejects attempts to change the denomination");
+            using (var shared = await http.PostAsJsonAsync(promote, new { }))
+            {
+                var details = await shared.Content.ReadFromJsonAsync<JsonElement>();
+                Check(shared.StatusCode == HttpStatusCode.OK && shared.Headers.CacheControl?.NoStore == true
+                    && details.GetProperty("mode").GetString() == "oncePerAccount" && details.GetProperty("claimCount").GetInt64() == 1
+                    && details.GetProperty("status").GetString() == "active" && details.GetProperty("redeemedAt").ValueKind == JsonValueKind.Null
+                    && !details.TryGetProperty("code", out _) && !details.TryGetProperty("redeemedBy", out _),
+                    "Sharing a claimed code returns its original claim count without account identifiers or secrets");
+            }
+            var ownerRetry = await Redeem("合成字样17");
+            Check(ownerRetry.GetProperty("alreadyRedeemed").GetBoolean() && ownerRetry.GetProperty("balance").GetInt64() == 34
+                && ownerRetry.GetProperty("reference").GetString() == first.GetProperty("reference").GetString(),
+                "An old claimant keeps the same ledger reference and current balance through the unchanged HTTP redemption contract");
+            Equal(17L, fixture.Store.RedeemCode(other, "合成字样17").Balance, "A different customer may now claim the same custom phrase");
             using var list = await http.GetAsync(path);
             var metadata = await list.Content.ReadFromJsonAsync<JsonElement>();
             Check(metadata.EnumerateArray().All(r => !r.TryGetProperty("code", out _) && !r.TryGetProperty("codeHash", out _)),

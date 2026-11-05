@@ -81,6 +81,7 @@
     describePlan();
   }
   const statuses = {active:'有效',expired:'已过期',redeemed:'已兑换',revoked:'已停用'};
+  const modeLabels = {singleUse:'一次性码 · 仅一个账号可领', oncePerAccount:'共享码 · 每个账号可领一次'};
   function renderList(kind, items) {
     const coupon = kind === 'coupons';
     const list = $(coupon ? 'couponList' : 'redemptionList');
@@ -90,15 +91,32 @@
       const row = el('article'); row.className = 'record';
       const content = el('div');
       const state = coupon ? (item.revokedAt ? 'revoked' : Date.parse(item.expiresAt) <= Date.now() ? 'expired' : 'active') : item.status;
+      const mode = item.mode ?? 'singleUse';
+      const claims = Number.isSafeInteger(item.claimCount) && item.claimCount >= 0 ? item.claimCount : '—';
       const summary = coupon ? item.planId + ' · ' + money(item.amountFen) : item.credits + ' 积分' + (item.note ? ' · ' + item.note : '');
       content.append(el('h3', summary), el('p', (statuses[state] || '待确认') + ' · 有效至 ' + (item.expiresAt ? when(item.expiresAt) : '长期有效')),
         el('p', (coupon ? '活动 ID ' : '记录 ID ') + item.id));
       if (coupon) content.append(el('p', '爱发电折扣方案 ' + item.afdianPlanId));
+      else content.append(el('p', (modeLabels[mode] || '领取方式待确认') + ' · 已领取账号 ' + claims));
       row.append(content);
-      if (state === 'active' && /^[a-f0-9]{32}$/i.test(item.id)) {
-        const revoke = el('button', coupon ? '停用活动' : '撤销兑换码'); revoke.type = 'button'; revoke.className = 'light';
-        revoke.addEventListener('click', () => showReview({kind,id:item.id}, revoke.textContent, [['记录',summary],['ID',item.id]]));
-        row.append(revoke);
+      if (/^[a-f0-9]{32}$/i.test(item.id)) {
+        const actions = el('div'); actions.className = 'actions';
+        if (state === 'active') {
+          const revoke = el('button', coupon ? '停用活动' : '撤销兑换码'); revoke.type = 'button'; revoke.className = 'light';
+          const rows = [['记录',summary],['ID',item.id]];
+          if (!coupon && mode === 'oncePerAccount') rows.push(['停用后','停止新账号领取，已到账积分保留。']);
+          revoke.addEventListener('click', () => showReview({kind,id:item.id,action:'revoke'}, revoke.textContent, rows));
+          actions.append(revoke);
+        }
+        if (!coupon && item.mode === 'singleUse' && ['active','redeemed'].includes(state)
+          && !item.revokedAt && (!item.expiresAt || Date.parse(item.expiresAt) > Date.now())) {
+          const share = el('button','转为共享码'); share.type = 'button'; share.className = 'light';
+          share.addEventListener('click', () => showReview({kind,id:item.id,action:'share'}, '转为共享码', [
+            ['记录',summary],['ID',item.id],['已领取账号',claims],['转换后','其他账号均可凭原口令各领一次。已领取账号保留记录，无法重复领取。']
+          ]));
+          actions.append(share);
+        }
+        if (actions.children.length) row.append(actions);
       }
       list.append(row);
     }
@@ -206,14 +224,17 @@
     const note = $('note').value.trim();
     if (note.length > 120 || /[\x00-\x1f\x7f]/.test(note)) throw Error('备注最多 120 字，请移除控制字符。');
     const count = whole('count',1,50);
+    const mode = $('redemptionMode').value;
+    if (!Object.hasOwn(modeLabels, mode)) throw Error('请选择领取方式。');
     const customCode = count === 1 ? $('redemptionCustomCode').value.replace(/^ +| +$/g, '') : '';
-    return {credits:whole('credits',1,1000000), count, days:whole('redemptionDays',1,365), note, ...(customCode ? {customCode} : {})};
+    return {credits:whole('credits',1,1000000), count, days:whole('redemptionDays',1,365), note,
+      ...(mode === 'oncePerAccount' ? {mode} : {}), ...(customCode ? {customCode} : {})};
   }
   function showReview(operation, title, rows) {
     if (!loggedIn || review) return;
     if (!$('issued').hidden) { notice('请先保存并关闭上一次生成的口令。'); $('issuedTitle').focus(); return; }
     review = operation;
-    $('reviewTitle').textContent = title; $('confirm').textContent = operation.id ? '确认停用' : '确认创建';
+    $('reviewTitle').textContent = title; $('confirm').textContent = operation.action === 'share' ? '确认转为共享码' : operation.id ? '确认停用' : '确认创建';
     $('summary').replaceChildren();
     for (const [name,value] of rows) { const row=el('div'); row.append(el('dt',name),el('dd',value)); $('summary').append(row); }
     $('reviewMessage').textContent = ''; $('review').showModal(); $('back').focus();
@@ -228,7 +249,9 @@
         const b = coupon ? couponBody() : redemptionBody();
         const plan = plans.find(p => p.id === b.planId);
         const rows = coupon ? [['套餐',plan.name + ' · ' + plan.credits + ' 积分'],['原价',money(plan.amountFen)],['折后价',money(b.amountFen)],['爱发电方案',b.afdianPlanId],['口令',b.customCode ? '使用已填写的口令' : '自动生成']]
-          : [['每码积分',b.credits],['生成数量',b.count],['积分合计',b.credits*b.count],['口令',b.customCode ? '使用已填写的自定义口令' : '随机生成'],['批次备注',b.note || '无']];
+          : [['领取方式',modeLabels[b.mode || 'singleUse']],['每码积分',b.credits],['生成数量',b.count],
+            b.mode === 'oncePerAccount' ? ['发放范围','每个账号可从每张共享码各领一次，实际发放积分随领取账号数增加。'] : ['积分合计',b.credits*b.count],
+            ['口令',b.customCode ? '使用已填写的自定义口令' : '随机生成'],['批次备注',b.note || '无']];
         rows.push(['有效期',b.days + ' 天']);
         showReview({kind}, coupon ? '确认优惠活动' : '确认兑换码批次', rows);
       } catch (error) { notice(error.message,true); }
@@ -238,20 +261,22 @@
     coupon_plan_conflict:'此爱发电方案已绑定其他价格或套餐，请更换独立折扣方案。', coupon_exists:'这个优惠口令已经发放过，请更换。',
     invalid_coupon:'活动配置无效，请检查折后价和爱发电方案。', coupon_unavailable:'自定义口令不可用，请更换。',
     redemption_already_used:'该兑换码已被使用，无法撤销。', invalid_redemption_options:'请检查积分、数量、有效期和备注。',
-    invalid_redemption_code:'自定义兑换口令不可用，请检查字符、长度或保留格式。', redemption_code_exists:'这个口令已发放或与已有口令冲突，请更换后再试。'
+    invalid_redemption_code:'自定义兑换口令不可用，请检查字符、长度或保留格式。', redemption_code_exists:'这个口令已发放或与已有口令冲突，请更换后再试。',
+    redemption_share_unavailable:'兑换码已过期或停用，无法转为共享码。请返回并刷新记录。'
   };
   $('confirm').addEventListener('click', async () => {
     if (!loggedIn || !review || writing) return;
     const stamp = epoch;
     const operation = review;
-    const {kind,id} = operation;
+    const {kind,id,action} = operation;
     const coupon = kind === 'coupons';
     writing = true; $('confirm').disabled = true; $('back').disabled = true; $('reviewMessage').textContent = '正在提交…';
     try {
       if (id) {
-        await api(kind + '/' + encodeURIComponent(id) + '/revoke','POST',{});
+        const result = await api(kind + '/' + encodeURIComponent(id) + '/' + action,'POST',{});
         if (stamp !== epoch) return;
-        notice(coupon ? '活动已停用。' : '兑换码已撤销。');
+        if (action === 'share' && (result?.id !== id || result.mode !== 'oncePerAccount')) throw new Fault(0,'invalid_reply');
+        notice(action === 'share' ? '领取方式已转为共享，原有领取记录保留。' : coupon ? '活动已停用。' : '兑换码已撤销。');
       } else {
         const body = coupon ? couponBody() : redemptionBody();
         if (!keys.has(kind)) keys.set(kind,crypto.randomUUID());

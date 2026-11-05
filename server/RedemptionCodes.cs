@@ -8,7 +8,8 @@ namespace Mugonzei.Server;
 public sealed record GeneratedRedemptionCode(string Id, string Code, int Credits, DateTimeOffset? ExpiresAt);
 public sealed record RedemptionResult(int Credits, long Balance, long Reserved, bool AlreadyRedeemed, string Reference);
 public sealed record RedemptionCodeRecord(string Id, int Credits, DateTimeOffset? ExpiresAt,
-    DateTimeOffset CreatedAt, string Note, string Status, DateTimeOffset? RedeemedAt, string? RedeemedBy);
+    DateTimeOffset CreatedAt, string Note, string Status, DateTimeOffset? RedeemedAt, string? RedeemedBy,
+    string Mode, long ClaimCount);
 public sealed record RedeemCodeRequest(string? Code);
 
 public sealed partial class Store
@@ -24,6 +25,12 @@ public sealed partial class Store
           CHECK(revoked_at IS NULL OR redeemed_by IS NULL));
         CREATE INDEX IF NOT EXISTS redemption_codes_created ON redemption_codes(created_at,id);
         CREATE INDEX IF NOT EXISTS redemption_codes_user ON redemption_codes(redeemed_by);
+        CREATE TABLE IF NOT EXISTS shared_redemption_codes (
+          code_id TEXT PRIMARY KEY REFERENCES redemption_codes(id), revoked_at TEXT) WITHOUT ROWID;
+        CREATE TABLE IF NOT EXISTS redemption_claims (
+          code_id TEXT NOT NULL REFERENCES shared_redemption_codes(code_id),
+          user_id TEXT NOT NULL REFERENCES users(id), claimed_at TEXT NOT NULL,
+          PRIMARY KEY(code_id,user_id)) WITHOUT ROWID;
         """);
 
     private static ApiException UnavailableCode() => new(400, "redemption_unavailable", "兑换码无效、已被使用或已失效，请核对后重试。");
@@ -74,7 +81,8 @@ public sealed partial class Store
     }
 
     private static IReadOnlyList<GeneratedRedemptionCode> CreateRedemptionCodes(SqliteConnection db,
-        SqliteTransaction tx, int credits, int count, DateTimeOffset? expiresAt, string note, string? customCode = null)
+        SqliteTransaction tx, int credits, int count, DateTimeOffset? expiresAt, string note,
+        string? customCode = null, string mode = "singleUse")
     {
         DateTimeOffset now = DateTimeOffset.UtcNow;
         if (credits is < 1 or > 1_000_000 || count is < 1 or > 1000 || note is null
@@ -82,6 +90,8 @@ public sealed partial class Store
             || expiresAt is { } expiry && (expiry <= now || expiry > now.AddYears(10)))
             throw new ApiException(400, "invalid_redemption_options", "积分须为 1–1000000，数量须为 1–1000；有效期须在未来十年内，备注最多 120 字且不得包含控制字符。");
         expiresAt = expiresAt?.ToUniversalTime();
+        if (mode is not ("singleUse" or "oncePerAccount"))
+            throw new ApiException(400, "invalid_redemption_options", "请选择单次使用或每个账号领取一次。");
         string? customHash = null;
         if (customCode is not null)
         {
@@ -107,6 +117,7 @@ public sealed partial class Store
                 """, ("$id", id), ("$hash", customHash ?? CodeHash(code)), ("$credits", credits),
                 ("$expiry", expiresAt?.ToString("O", CultureInfo.InvariantCulture)),
                 ("$created", now.ToString("O", CultureInfo.InvariantCulture)), ("$note", note.Trim()));
+            if (mode == "oncePerAccount") EnableSharing(db, tx, id);
             result.Add(new(id, code, credits, expiresAt));
         }
         return result;
@@ -119,22 +130,66 @@ public sealed partial class Store
     }
 
     private sealed record CodeRow(string Id, int Credits, DateTimeOffset? ExpiresAt, DateTimeOffset CreatedAt,
-        string Note, DateTimeOffset? RevokedAt, string? RedeemedBy, DateTimeOffset? RedeemedAt)
+        string Note, DateTimeOffset? RevokedAt, string? RedeemedBy, DateTimeOffset? RedeemedAt, bool Shared)
     {
-        public RedemptionCodeRecord Metadata() => new(Id, Credits, ExpiresAt, CreatedAt, Note,
+        public RedemptionCodeRecord Metadata(long claimCount) => new(Id, Credits, ExpiresAt, CreatedAt, Note,
             RedeemedBy is not null ? "redeemed" : RevokedAt is not null ? "revoked"
-            : ExpiresAt <= DateTimeOffset.UtcNow ? "expired" : "active", RedeemedAt, RedeemedBy);
+            : ExpiresAt <= DateTimeOffset.UtcNow ? "expired" : "active", RedeemedAt, RedeemedBy,
+            Shared ? "oncePerAccount" : "singleUse", claimCount);
     }
-    private const string CodeColumns = "id,credits,expires_at,created_at,note,revoked_at,redeemed_by,redeemed_at";
+    // Older servers must see every shared code as unavailable. The base row's revoked_at
+    // closes their single-use path; only the shared row controls an upgraded server.
+    private const string CodeColumns = """
+        c.id,c.credits,c.expires_at,c.created_at,c.note,
+        CASE WHEN s.code_id IS NULL THEN c.revoked_at ELSE s.revoked_at END,
+        c.redeemed_by,c.redeemed_at,s.code_id IS NOT NULL
+        """;
+    private const string CodeTables = " FROM redemption_codes c LEFT JOIN shared_redemption_codes s ON s.code_id=c.id";
+    private const string ClaimCountSql = """
+        ,CASE WHEN s.code_id IS NULL THEN (c.redeemed_by IS NOT NULL)
+              ELSE (SELECT COUNT(*) FROM redemption_claims WHERE code_id=c.id) END
+        """;
     private static CodeRow ReadCodeRow(SqliteDataReader row) => new(row.GetString(0), row.GetInt32(1),
         row.IsDBNull(2) ? null : Date(row.GetString(2)), Date(row.GetString(3)), row.GetString(4),
         row.IsDBNull(5) ? null : Date(row.GetString(5)), row.IsDBNull(6) ? null : row.GetString(6),
-        row.IsDBNull(7) ? null : Date(row.GetString(7)));
-    private static CodeRow? ReadCode(SqliteConnection db, SqliteTransaction? tx, string field, string value)
+        row.IsDBNull(7) ? null : Date(row.GetString(7)), row.GetBoolean(8));
+    private static CodeRow? ReadCode(SqliteConnection db, SqliteTransaction tx, string field, string value)
     {
         // The field is selected only by the two internal call sites, never from user input.
-        using var command = Command(db, tx, "SELECT " + CodeColumns + " FROM redemption_codes WHERE " + field + "=$value", ("$value", value));
+        using var command = Command(db, tx, "SELECT " + CodeColumns + CodeTables + " WHERE c." + field + "=$value", ("$value", value));
         using var reader = command.ExecuteReader(); return reader.Read() ? ReadCodeRow(reader) : null;
+    }
+
+    private static RedemptionCodeRecord CodeMetadata(SqliteConnection db, SqliteTransaction tx, string id)
+    {
+        using var command = Command(db, tx, "SELECT " + CodeColumns + ClaimCountSql + CodeTables + " WHERE c.id=$id", ("$id", id));
+        using var reader = command.ExecuteReader();
+        return reader.Read() ? ReadCodeRow(reader).Metadata(reader.GetInt64(9)) : throw Missing();
+    }
+
+    private static void EnableSharing(SqliteConnection db, SqliteTransaction tx, string id)
+    {
+        // Copy the original claim (if any) before closing the legacy path. No money moves.
+        Execute(db, tx, """
+            INSERT INTO shared_redemption_codes(code_id) VALUES($id);
+            INSERT INTO redemption_claims(code_id,user_id,claimed_at)
+              SELECT id,redeemed_by,redeemed_at FROM redemption_codes WHERE id=$id AND redeemed_by IS NOT NULL;
+            UPDATE redemption_codes SET redeemed_by=NULL,redeemed_at=NULL,revoked_at=$now WHERE id=$id;
+            """, ("$id", id), ("$now", Now()));
+    }
+
+    public RedemptionCodeRecord ShareRedemptionCode(string id)
+    {
+        id = Id(id); using var db = Open(); using var tx = db.BeginTransaction();
+        var row = ReadCode(db, tx, "id", id) ?? throw Missing();
+        if (!row.Shared)
+        {
+            if (row.RevokedAt is not null || row.ExpiresAt <= DateTimeOffset.UtcNow)
+                throw new ApiException(409, "redemption_share_unavailable", "已停用或过期的兑换码不能改为共享。");
+            EnableSharing(db, tx, id);
+        }
+        var result = CodeMetadata(db, tx, id);
+        tx.Commit(); return result;
     }
 
     public RedemptionResult RedeemCode(string userId, string? code)
@@ -144,7 +199,14 @@ public sealed partial class Store
         var account = Account(db, tx, userId);
         var row = ReadCode(db, tx, "code_hash", hash) ?? throw UnavailableCode();
         string reference = "redemption:" + row.Id;
-        if (row.RedeemedBy == userId)
+        bool alreadyClaimed = row.RedeemedBy == userId;
+        if (row.Shared)
+        {
+            using var previous = Command(db, tx, "SELECT 1 FROM redemption_claims WHERE code_id=$id AND user_id=$user",
+                ("$id", row.Id), ("$user", userId));
+            alreadyClaimed = previous.ExecuteScalar() is not null;
+        }
+        if (alreadyClaimed)
         {
             tx.Commit();
             return new(row.Credits, account.Balance, account.Reserved, true, reference);
@@ -153,7 +215,10 @@ public sealed partial class Store
             throw UnavailableCode();
         if (account.Balance > long.MaxValue - row.Credits)
             throw new ApiException(409, "credit_limit", "账户积分已达到上限，本次兑换未入账，兑换码仍可使用。");
-        if (Execute(db, tx, """
+        if (row.Shared)
+            Execute(db, tx, "INSERT INTO redemption_claims(code_id,user_id,claimed_at) VALUES($id,$user,$now)",
+                ("$id", row.Id), ("$user", userId), ("$now", Now()));
+        else if (Execute(db, tx, """
             UPDATE redemption_codes SET redeemed_by=$user,redeemed_at=$now
             WHERE id=$id AND redeemed_by IS NULL AND revoked_at IS NULL
             """, ("$user", userId), ("$now", Now()), ("$id", row.Id)) != 1) throw UnavailableCode();
@@ -167,9 +232,9 @@ public sealed partial class Store
     {
         if (limit is < 1 or > 1000) throw new ApiException(400, "invalid_redemption_options", "查询数量须为 1–1000。");
         using var db = Open(); using var command = Command(db, null,
-            "SELECT " + CodeColumns + " FROM redemption_codes ORDER BY created_at DESC,id DESC LIMIT $limit", ("$limit", limit));
+            "SELECT " + CodeColumns + ClaimCountSql + CodeTables + " ORDER BY c.created_at DESC,c.id DESC LIMIT $limit", ("$limit", limit));
         using var reader = command.ExecuteReader(); var rows = new List<RedemptionCodeRecord>();
-        while (reader.Read()) rows.Add(ReadCodeRow(reader).Metadata());
+        while (reader.Read()) rows.Add(ReadCodeRow(reader).Metadata(reader.GetInt64(9)));
         return rows;
     }
 
@@ -180,8 +245,9 @@ public sealed partial class Store
         if (row.RedeemedBy is not null)
             throw new ApiException(409, "redemption_already_used", "该兑换码已入账，不能撤销或扣回用户积分。");
         if (row.RevokedAt is null)
-            Execute(db, tx, "UPDATE redemption_codes SET revoked_at=$now WHERE id=$id", ("$now", Now()), ("$id", id));
-        row = ReadCode(db, tx, "id", id)!;
-        tx.Commit(); return row.Metadata();
+            Execute(db, tx, row.Shared ? "UPDATE shared_redemption_codes SET revoked_at=$now WHERE code_id=$id"
+                : "UPDATE redemption_codes SET revoked_at=$now WHERE id=$id", ("$now", Now()), ("$id", id));
+        var result = CodeMetadata(db, tx, id);
+        tx.Commit(); return result;
     }
 }

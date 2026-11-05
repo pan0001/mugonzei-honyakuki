@@ -7,7 +7,7 @@ namespace Mugonzei.Server;
 public static class AdminRedemptions
 {
     [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
-    private sealed record Batch(int Credits, int Count, int Days, string? Note, string? CustomCode);
+    private sealed record Batch(int Credits, int Count, int Days, string? Note, string? CustomCode, string? Mode);
 
     public static void Map(RouteGroupBuilder authorized)
     {
@@ -19,7 +19,7 @@ public static class AdminRedemptions
             var key = AdminIssuance.RequestKey(request);
             if (input.Count is < 1 or > 50 || input.Days is < 1 or > 365)
                 throw new ApiException(400, "invalid_redemption_options", "每批可生成 1–50 个兑换码，有效期须为 1–365 天。");
-            var issued = store.IssueAdminRedemptions(key, input.Credits, input.Count, input.Days, input.Note ?? "", input.CustomCode);
+            var issued = store.IssueAdminRedemptions(key, input.Credits, input.Count, input.Days, input.Note ?? "", input.CustomCode, input.Mode ?? "singleUse");
             return Results.Json(new { codes = issued }, statusCode: StatusCodes.Status201Created);
         });
         codes.MapPost("/{id}/revoke", (string id, JsonElement body, Store store) =>
@@ -28,12 +28,18 @@ public static class AdminRedemptions
                 throw new ApiException(400, "invalid_revoke_request", "撤销请求需要一个空 JSON 对象。");
             return Metadata(store.RevokeRedemptionCode(id));
         });
+        codes.MapPost("/{id}/share", (string id, JsonElement body, Store store) =>
+        {
+            if (body.ValueKind != JsonValueKind.Object || body.EnumerateObject().Any())
+                throw new ApiException(400, "invalid_share_request", "共享请求需要一个空 JSON 对象。");
+            return Metadata(store.ShareRedemptionCode(id));
+        });
     }
 
     // Explicit allowlist. The internal record also carries the redeemer's account ID.
     private static object Metadata(RedemptionCodeRecord row) => new
     {
-        row.Id, row.Credits, row.ExpiresAt, row.CreatedAt, row.Note, row.Status, row.RedeemedAt
+        row.Id, row.Credits, row.ExpiresAt, row.CreatedAt, row.Note, row.Status, row.RedeemedAt, row.Mode, row.ClaimCount
     };
 }
 
@@ -64,12 +70,12 @@ public sealed partial class Store
             """, ("$purpose", purpose), ("$request", requestId.ToString("D")), ("$now", Now())) == 1;
     }
 
-    internal IReadOnlyList<GeneratedRedemptionCode> IssueAdminRedemptions(Guid requestId, int credits, int count, int days, string note, string? customCode)
+    internal IReadOnlyList<GeneratedRedemptionCode> IssueAdminRedemptions(Guid requestId, int credits, int count, int days, string note, string? customCode, string mode)
     {
         using var db = Open(); using var tx = db.BeginTransaction();
         if (!ReserveAdminIssuance(db, tx, "redemption", requestId))
             throw new ApiException(409, "redemption_batch_exists", "该请求已生成兑换码。请查看列表核对，明文仅在首次成功时显示。");
-        var issued = CreateRedemptionCodes(db, tx, credits, count, DateTimeOffset.UtcNow.AddDays(days), note, customCode);
+        var issued = CreateRedemptionCodes(db, tx, credits, count, DateTimeOffset.UtcNow.AddDays(days), note, customCode, mode);
         tx.Commit();
         return issued;
     }

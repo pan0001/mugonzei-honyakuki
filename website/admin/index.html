@@ -39,13 +39,14 @@
       <section class="card"><div class="row"><h2>已有优惠活动</h2><button id="refreshCoupons" type="button" class="light">刷新活动</button></div><div class="records" id="couponList"></div></section>
     </section>
     <section id="redemptionPage" aria-labelledby="redemptionTab" hidden>
-      <section class="card"><h2>生成积分兑换码</h2><p>每个码可兑换一次。生成后请及时抄存，历史列表只保留发放记录。</p>
+      <section class="card"><h2>生成积分兑换码</h2><p>生成后请及时抄存口令。历史列表可查看领取记录。</p>
         <form id="redemptionForm" method="post" autocomplete="off"><div class="grid">
+          <label>领取方式<select id="redemptionMode"><option value="singleUse" selected>一次性码 · 仅一人可领</option><option value="oncePerAccount">共享码 · 每个账号可领一次</option></select></label>
           <label>每码积分<input id="credits" type="number" min="1" max="1000000" step="1" required></label>
           <label>生成数量<input id="count" type="number" min="1" max="50" step="1" value="1" required></label>
           <label>有效期（天）<input id="redemptionDays" type="number" min="1" max="365" step="1" value="30" required></label>
           <label>批次备注（选填）<input id="note" maxlength="120" type="text" placeholder="例如 活动名称"></label>
-          <label>自定义兑换口令（选填）<input id="redemptionCustomCode" type="text" maxlength="80" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="留空则随机生成"><small>仅限生成 1 张。可用 4–40 个汉字、英文字母或数字，可用短横线分组。每个口令只能兑换一次。</small></label>
+          <label>自定义兑换口令（选填）<input id="redemptionCustomCode" type="text" maxlength="80" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="留空则随机生成"><small>仅限生成 1 张。可用 4–40 个汉字、英文字母或数字，可用短横线分组。</small></label>
         </div><button type="submit">核对批次</button></form>
       </section>
       <section class="card"><div class="row"><h2>兑换码记录</h2><button id="refreshRedemptions" type="button" class="light">刷新记录</button></div><div class="records" id="redemptionList"></div></section>
