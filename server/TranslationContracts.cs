@@ -21,25 +21,70 @@ public sealed record TranslationInput(string Mode, string? Text, byte[]? Image, 
 
     public static TranslationInput Validate(TranslationRequest request)
     {
-        if (request.Mode is not ("text" or "image" or "handwriting"))
+        return Validate(request.Mode, request.Text, request.TargetLanguage, request.ImageBase64 is not null, () =>
+        {
+            if (string.IsNullOrEmpty(request.ImageBase64) || request.ImageBase64.Length > MaxImageBytes / 3 * 4)
+                return null;
+            try { return Convert.FromBase64String(request.ImageBase64); }
+            catch (FormatException) { return null; }
+        });
+    }
+
+    public static async Task<TranslationInput> ReadRequestAsync(Stream stream, long? contentLength, CancellationToken token)
+    {
+        var body = await TranslationStreams.ReadBoundedAsync(stream, MaxRequestBytes, token, contentLength);
+        var request = JsonSerializer.Deserialize<Upload>(body.Span, Json) ?? throw new JsonException();
+        return Validate(request.Mode, request.Text, request.TargetLanguage, request.ImageBase64 is not null, () => request.ImageBase64?.Bytes);
+    }
+
+    [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+    private sealed record Upload(string Mode, string? Text, UploadImage? ImageBase64, string TargetLanguage);
+
+    [JsonConverter(typeof(UploadImageConverter))]
+    private sealed record UploadImage(byte[]? Bytes);
+
+    private sealed class UploadImageConverter : JsonConverter<UploadImage>
+    {
+        public override UploadImage Read(ref Utf8JsonReader reader, Type type, JsonSerializerOptions options)
+        {
+            if (reader.TokenType != JsonTokenType.String) throw new JsonException();
+            // The reader is over our single bounded UTF-8 buffer. Keep the old length limit
+            // on the JSON-decoded base64 (including whitespace), not on JSON escape sequences.
+            const int limit = MaxImageBytes / 3 * 4;
+            var raw = reader.ValueSpan;
+            int length = raw.Length;
+            while (length > limit && reader.ValueIsEscaped)
+            {
+                int index = raw.IndexOf((byte)'\\');
+                if (index < 0) break;
+                int extra = raw[index + 1] == (byte)'u' ? 5 : 1;
+                length -= extra;
+                raw = raw[(index + extra + 1)..];
+            }
+            return new(length <= limit && reader.TryGetBytesFromBase64(out var bytes) ? bytes : null);
+        }
+
+        public override void Write(Utf8JsonWriter writer, UploadImage value, JsonSerializerOptions options)
+            => writer.WriteBase64StringValue(value.Bytes);
+    }
+
+    private static TranslationInput Validate(string mode, string? text, string? targetLanguage, bool hasImage, Func<byte[]?> decode)
+    {
+        if (mode is not ("text" or "image" or "handwriting"))
             throw new ApiException(400, "invalid_mode", "请选择文字、图片或手写识别。");
-        string language = (request.TargetLanguage ?? "").Trim();
+        string language = (targetLanguage ?? "").Trim();
         if (language.Length is < 1 or > 100 || language.Any(char.IsControl))
             throw new ApiException(400, "invalid_language", "目标语言无效。");
-        if (request.Mode == "text")
+        if (mode == "text")
         {
-            if (request.Text is null || request.Text.Length > MaxTextCharacters || request.ImageBase64 is not null)
+            if (text is null || text.Length > MaxTextCharacters || hasImage)
                 throw new ApiException(400, "invalid_text", "文字请求需要不超过 16000 个字符的原文，且不能携带图片。");
-            return new(request.Mode, request.Text, null, language);
+            return new(mode, text, null, language);
         }
-        if (request.Text is not null || string.IsNullOrEmpty(request.ImageBase64)
-            || request.ImageBase64.Length > MaxImageBytes / 3 * 4)
+        if (text is not null || !hasImage || decode() is not byte[] bytes)
             throw new ApiException(400, "invalid_image", "图片请求需要不超过 12 MiB 的 PNG 图片，且不能携带原文。");
-        byte[] bytes;
-        try { bytes = Convert.FromBase64String(request.ImageBase64); }
-        catch (FormatException) { throw new ApiException(400, "invalid_image", "图片编码无效。"); }
         ValidatePng(bytes);
-        return new(request.Mode, null, bytes, language);
+        return new(mode, null, bytes, language);
     }
 
     // This metadata is safe to persist: the image itself exists only in the work queue.
@@ -49,7 +94,8 @@ public sealed record TranslationInput(string Mode, string? Text, byte[]? Image, 
         imageSha256 = Image is null ? null : Convert.ToHexString(SHA256.HashData(Image))
     }, Json);
 
-    public string BodyHash() => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(PersistenceJson())));
+    public string BodyHash() => HashMetadata(PersistenceJson());
+    internal static string HashMetadata(string json) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
 
     private static void ValidatePng(byte[] bytes)
     {
@@ -129,16 +175,28 @@ public sealed class TranslationOptions
 
 internal static class TranslationStreams
 {
-    public static async Task<byte[]> ReadBoundedAsync(Stream stream, int limit, CancellationToken token)
+    public static async Task<ReadOnlyMemory<byte>> ReadBoundedAsync(Stream stream, int limit, CancellationToken token, long? contentLength)
     {
-        using var output = new MemoryStream();
-        byte[] buffer = new byte[16_384];
+        if (contentLength > limit) throw new TranslationProcessingException("response_too_large");
+        int capacity = contentLength is >= 0 ? (int)contentLength : Math.Min(limit, 16_384);
+        byte[] buffer = GC.AllocateUninitializedArray<byte>(capacity);
+        int used = 0;
+        byte[] probe = new byte[1];
         while (true)
         {
-            int read = await stream.ReadAsync(buffer, token);
-            if (read == 0) return output.ToArray();
-            if (output.Length + read > limit) throw new TranslationProcessingException("response_too_large");
-            await output.WriteAsync(buffer.AsMemory(0, read), token);
+            if (used == buffer.Length)
+            {
+                // Probe the boundary before growing. Honest Content-Length needs only one buffer;
+                // chunked or misleading lengths still cannot bypass the hard limit.
+                if (await stream.ReadAsync(probe, token) == 0) return buffer.AsMemory(0, used);
+                if (used == limit) throw new TranslationProcessingException("response_too_large");
+                Array.Resize(ref buffer, Math.Min(limit, Math.Max(16_384, used * 2)));
+                buffer[used++] = probe[0];
+                continue;
+            }
+            int read = await stream.ReadAsync(buffer.AsMemory(used), token);
+            if (read == 0) return buffer.AsMemory(0, used);
+            used += read;
         }
     }
 }

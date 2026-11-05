@@ -33,6 +33,8 @@
   }
 
   function clearDetails(label) {
+    byId('timing-values').hidden = true;
+    setText('timing-note', label);
     for (const id of ['storage-state', 'translation-state', 'payments-state']) badge(id, [label, 'muted']);
     setText('uptime', label);
     setText('queue-note', label);
@@ -97,6 +99,17 @@
   }
 
   function showSample(sample) {
+    const timing = sample.timings;
+    const fields = [['queue-ms', 'queueMs'], ['model-ms', 'modelMs'], ['settlement-ms', 'settlementMs']];
+    const hasTimings = timing && isCount(timing.samples) && timing.samples > 0 && timing.samples <= 32 &&
+      fields.every(([, key]) => Number.isFinite(timing[key]) && timing[key] >= 0);
+    byId('timing-values').hidden = !hasTimings;
+    setText('timing-note', hasTimings ? '最近 ' + timing.samples + ' 笔已完成任务的平均耗时'
+      : timing?.samples === 0 ? '服务启动后还没有已完成的翻译。' : '服务器暂未提供耗时。');
+    if (hasTimings) for (const [id, key] of fields) {
+      const ms = timing[key];
+      setText(id, ms < 1000 ? (ms < 1 ? '< 1' : String(Math.round(ms))) + ' 毫秒' : (ms / 1000).toFixed(1) + ' 秒');
+    }
     if (sample.status === 'operational') {
       overview('后台运行正常', '状态接口可访问，账户数据库可正常读取。', 'good');
     } else {

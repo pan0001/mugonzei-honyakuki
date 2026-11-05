@@ -54,6 +54,7 @@ public static class MugonzeiHost
         builder.Services.AddHttpClient<IAfdianClient, AfdianClient>(client => client.Timeout = Timeout.InfiniteTimeSpan)
             .ConfigurePrimaryHttpMessageHandler(() => new HttpClientHandler { AllowAutoRedirect = false });
         builder.Services.AddSingleton<PaymentService>();
+        if (options.LivePayments) builder.Services.AddHostedService<PaymentReconciliationWorker>();
         builder.Services.AddHostedService<StoreMaintenance>();
         TranslationEndpoints.AddTranslationServices(builder.Services, builder.Configuration, builder.Environment);
         builder.Services.AddRateLimiter(limits =>
@@ -108,17 +109,9 @@ public static class MugonzeiHost
         });
         app.Use(async (context, next) => { context.RequestServices.GetRequiredService<AuthService>().Authenticate(context); await next(context); });
         app.UseRateLimiter();
-        using var uploads = new SemaphoreSlim(4, 4);
-        app.Use(async (context, next) =>
-        {
-            if (context.Request.Method != "PUT" || !context.Request.Path.StartsWithSegments("/v1/translations")) { await next(context); return; }
-            _ = AuthService.UserId(context);
-            if (!uploads.Wait(0)) throw new ApiException(429, "uploads_busy", "上传通道已满，请稍后重试同一请求编号。");
-            try { await next(context); }
-            finally { uploads.Release(); }
-        });
 
         app.MapGet("/health", () => Results.Ok(new { status = "ok" }));
+        PublicStatusEndpoint.Map(app);
         app.MapPost("/v1/auth/register/email-code", async (EmailCodeRequest input, HttpContext context, RegistrationEmailService email) =>
         {
             await email.RequestAsync(input.Email, context.Connection.RemoteIpAddress, context.RequestAborted);
@@ -186,7 +179,7 @@ public static class MugonzeiHost
                 || !order.TryGetProperty("out_trade_no", out var number) || number.ValueKind != JsonValueKind.String)
                 throw new ApiException(400, "invalid_notification", "订单通知无效。");
             // No amount, identity, plan or success flag from this untrusted body is used.
-            await payments.NotifyAsync(number.GetString()!, context.RequestAborted);
+            payments.AcceptNotification(number.GetString()!);
             return Results.Json(new { ec = 200, em = "" });
         }).RequireRateLimiting("webhook");
 

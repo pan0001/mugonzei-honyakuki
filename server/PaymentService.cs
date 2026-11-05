@@ -67,7 +67,7 @@ public sealed class AfdianClient(HttpClient http, ServerOptions options) : IAfdi
     private static ApiException Unavailable() => new(502, "payment_verification_unavailable", "暂时无法核验支付订单，请稍后刷新；未增加或扣除积分。");
 }
 
-public sealed class PaymentService(Store store, ServerOptions options, IAfdianClient afdian)
+public sealed class PaymentService(Store store, ServerOptions options, IAfdianClient afdian, TimeProvider? clock = null)
 {
     // One in-flight refresh per order. Entries are removed on completion, so this
     // guard cannot grow with the lifetime order count.
@@ -94,7 +94,7 @@ public sealed class PaymentService(Store store, ServerOptions options, IAfdianCl
     public async Task<OrderRecord> RefreshAsync(string userId, string id, CancellationToken token)
     {
         var order = store.GetOrder(userId, id);
-        if (order.Status == "paid" || options.MockPayments) return order;
+        if (order.Status != "pending" || options.MockPayments) return order;
         if (!options.LivePayments) throw new ApiException(503, "payments_disabled", "真实收款尚未启用。");
         if (!refreshing.TryAdd(order.Id, 0)) throw new ApiException(429, "refresh_in_progress", "订单正在核验，请稍后刷新。");
         try
@@ -108,20 +108,32 @@ public sealed class PaymentService(Store store, ServerOptions options, IAfdianCl
                 order = store.GetOrder(userId, id);
                 // The client filters unrelated/zero-value provider entries. An
                 // empty filtered page does not mean the provider has no next page.
-                if (order.Status == "paid") return order;
+                if (order.Status != "pending") return order;
             }
             return order;
         }
         finally { refreshing.TryRemove(order.Id, out _); }
     }
 
-    public async Task NotifyAsync(string tradeNo, CancellationToken token)
+    public void AcceptNotification(string tradeNo)
     {
         if (!options.LivePayments) throw new ApiException(503, "payments_disabled", "真实收款尚未启用。");
         if (tradeNo.Length is < 1 or > 128 || tradeNo.Any(c => !char.IsAsciiLetterOrDigit(c) && c is not ('-' or '_')))
             throw new ApiException(400, "invalid_notification", "订单通知无效。");
+        store.EnqueuePaymentVerification(tradeNo, (clock ?? TimeProvider.System).GetUtcNow());
+    }
+
+    internal async Task<bool> VerifyNotificationAsync(string tradeNo, CancellationToken token)
+    {
         foreach (var order in await afdian.QueryAsync(tradeNo, 1, token))
-            if (order.TradeNo == tradeNo) ApplyVerified(order);
+        {
+            if (order.TradeNo != tradeNo || order.Status != 2) continue;
+            // A verified completed purchase may belong to another product at this creator.
+            // Only an existing local custom ID and matching price and plan can award credits.
+            ApplyVerified(order);
+            return true;
+        }
+        return false;
     }
 
     public OrderRecord? ApplyVerified(VerifiedAfdianOrder payment)

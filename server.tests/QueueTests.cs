@@ -10,7 +10,7 @@ internal static partial class Program
         string user = fixture.User(20), other = fixture.User(5);
         var processor = new QueueGateProcessor(1);
         using var service = new TranslationService(fixture.Store, processor,
-            new TranslationOptions { Concurrency = 1, QueueCapacity = 2 }, NullLogger<TranslationService>.Instance);
+            new TranslationOptions { Concurrency = 1, QueueCapacity = 4 }, NullLogger<TranslationService>.Instance);
         await service.StartAsync(default);
         try
         {
@@ -18,9 +18,18 @@ internal static partial class Program
             service.Submit(user, running, TextInput("running"));
             await processor.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
             Equal("queued", service.Submit(user, first, TextInput("first queued")).Status, "First waiting task is queued");
-            Equal("queued", service.Submit(user, cancelled, TextInput("cancelled queued")).Status, "Second waiting task fills queue");
-            var rejected = service.Submit(user, Guid.NewGuid(), TextInput("overflow"));
-            Equal("queue_full", rejected.Error, "A genuinely full queue still rejects excess work");
+            Equal("queued", service.Submit(user, cancelled, TextInput("cancelled queued")).Status, "Second waiting task fills this account's waiting allowance");
+            Guid rejectedId = Guid.NewGuid();
+            var rejected = service.Submit(user, rejectedId, TextInput("overflow"));
+            Equal("queue_full", rejected.Error, "One account cannot occupy every waiting place");
+            Equal("queue_full", service.Submit(user, rejectedId, TextInput("overflow")).Error, "An already-rejected job has stable retry semantics");
+            Equal("queued", service.Submit(user, first, TextInput("first queued")).Status, "Existing job replay bypasses queue admission");
+            Guid[] otherIds = [Guid.NewGuid(), Guid.NewGuid()];
+            foreach (Guid id in otherIds) Equal("queued", service.Submit(other, id, TextInput("other")).Status, "A second account can use the other half");
+            string third = fixture.User(1);
+            Equal("queue_full", service.Submit(third, Guid.NewGuid(), TextInput("full")).Error, "Global queue capacity still blocks a third account when full");
+            Equal(0L, fixture.Store.GetAccount(third).Reserved, "Full queue does not tie up a rejected account's credit");
+            foreach (Guid id in otherIds) service.Cancel(other, id);
             Throws(404, () => service.Get(other, cancelled));
             service.Cancel(other, cancelled); // Same identifier in another account must not remove this user's task.
             Equal("queued", service.Get(user, cancelled).Status, "Cross-account cancellation does not remove queued work");
@@ -42,7 +51,7 @@ internal static partial class Program
         using var fixture = new Fixture(); string user = fixture.User(20);
         var processor = new QueueGateProcessor(2);
         using var service = new TranslationService(fixture.Store, processor,
-            new TranslationOptions { Concurrency = 2, QueueCapacity = 3 }, NullLogger<TranslationService>.Instance);
+            new TranslationOptions { Concurrency = 2, QueueCapacity = 5 }, NullLogger<TranslationService>.Instance);
         await service.StartAsync(default);
         try
         {
@@ -71,7 +80,7 @@ internal static partial class Program
     {
         using var fixture = new Fixture(); string user = fixture.User(30);
         using var service = new TranslationService(fixture.Store, new FakeProcessor(),
-            new TranslationOptions { Concurrency = 3, QueueCapacity = 32 }, NullLogger<TranslationService>.Instance);
+            new TranslationOptions { Concurrency = 3, QueueCapacity = 40 }, NullLogger<TranslationService>.Instance);
         await service.StartAsync(default);
         try
         {

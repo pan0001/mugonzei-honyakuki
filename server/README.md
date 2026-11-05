@@ -21,7 +21,7 @@ Linux x64 发行包为 framework-dependent，不包含 .NET 运行时。目标�
 维护者可在仓库根目录用 PowerShell 7 打包既有 publish 目录；脚本不构建或启动服务：
 
 ```powershell
-dotnet publish server/Mugonzei.Server.csproj -c Release -r linux-x64 --self-contained false -p:UseAppHost=false -o dist/Mugonzei-Server-linux-x64-v0.2.3-preview
+dotnet publish server/Mugonzei.Server.csproj -c Release -r linux-x64 --self-contained false -p:UseAppHost=false -o dist/Mugonzei-Server-linux-x64-v0.2.11-preview
 ./tools/package-server-release.ps1
 ```
 
@@ -66,10 +66,11 @@ dotnet run --project server/Mugonzei.Server.csproj
 
 ## HTTP 接口
 
-除注册（含发验证码）、登录、计划列表、健康检查和平台回调外，接口使用 `Authorization: Bearer <token>`。密码使用随机 salt 的 PBKDF2-SHA256；数据库仅保存会话 token 的 SHA-256 摘要，14 天过期，退出立即撤销当前会话。新账号必须验证邮箱；已有账号继续用原用户名和密码登录。邮箱验证不提供密码找回或账户删除。
+除注册（含发验证码）、登录、计划列表、健康检查、公开状态和平台回调外，接口使用 `Authorization: Bearer <token>`。密码使用随机 salt 的 PBKDF2-SHA256；数据库仅保存会话 token 的 SHA-256 摘要，14 天过期，退出立即撤销当前会话。新账号必须验证邮箱；已有账号继续用原用户名和密码登录。邮箱验证不提供密码找回或账户删除。
 
 | 方法 | 路径 | 用途 |
 |---|---|---|
+| GET | `/v1/status` | 公开的服务器状态、数据库读检查、配置与队列计数 |
 | POST | `/v1/auth/register/email-code` | `{email}` → `204`，接受发送请求；不返回验证码 |
 | POST | `/v1/auth/register` | `{username,password,email,code}` → `{token,username,expiresAt}`；`code` 是 6 位数字字符串（可以 0 开头） |
 | POST | `/v1/auth/login` | `{username,password}` → `{token,username,expiresAt}`；原有账户不需要邮箱 |
@@ -86,7 +87,23 @@ dotnet run --project server/Mugonzei.Server.csproj
 | GET | `/v1/translations/{requestId}` | 查询进度与已结算结果 |
 | POST | `/v1/translations/{requestId}/cancel` | 取消尚未结算任务 |
 
-认证错误返回 `{error,message}`，不返回密钥、上游响应正文或原文。注册/登录限每来源 IP 每分钟 10 次，订单操作和翻译提交各限每账户每分钟 20 次，Webhook 限每来源 IP 每分钟 60 次；超过返回 429。翻译上传全局最多 4 个并发，其余立即拒绝，可使用相同请求编号重试；结果轮询不消耗提交配额，取消使用独立的每账户 60 次/分钟配额。认证与支付请求体上限 32 KiB，图片任务另有有界 PNG/base64 限制。
+认证错误返回 `{error,message}`。注册和登录每个来源 IP 每分钟最多 10 次，订单操作和翻译提交各限每个账户每分钟 20 次，Webhook 每个来源 IP 每分钟最多 60 次。结果轮询不占用提交配额，取消请求每个账户每分钟最多 60 次。认证与支付请求体上限 32 KiB。
+
+全站可同时接收 4 个翻译上传，每个账户最多占 2 个通道，上传时限 60 秒。收到 HTTP 429 `uploads_busy` 或 HTTP 408 `upload_timeout` 后可用原请求编号重试，此时尚未预留积分。每个账户最多占一半等待位（向上取整），已经在处理的任务另计。截图仍以原始 PNG 发送给模型，每次翻译只请求一次。
+
+### 公开状态
+
+访问[服务状态页](https://mugonzei.top/status.html)或读取 [GET /v1/status](https://api.mugonzei.top/v1/status)。该接口无需登录，只读取本服务的数据。服务器在 3 秒内复用同一次采样，响应设置 `Cache-Control: no-store`。
+
+| 字段 | 如何解读 |
+|---|---|
+| `status`、`storage` | 账户表可读且翻译工作进程未在停止时返回 HTTP 200、`operational`。读取失败或正在停止时返回 HTTP 503、`degraded`。`storage` 为 `readable` 或 `unavailable`。 |
+| `checkedAt`、`uptimeSeconds` | UTC 采样时间和本次服务启动以来的秒数。 |
+| `translation`、`payments` | 翻译可为 `configured`、`disabled`、`simulated`、`stopping`，充值可为 `enabled`、`disabled`、`simulated`。这些值来自本机配置和工作进程；外部模型能否完成翻译、支付能否到账须分别验证。 |
+| `queue` | `running / concurrency` 是执行中任务数与并发上限，`waiting / capacity` 是排队任务数与等待位上限。 |
+| `timings` | 本次启动后最近最多 32 笔已完成任务（含无文字结果）的平均毫秒数。`queueMs` 从入队计至开始模型处理，`modelMs` 包含上游通信和结果解析，`settlementMs` 包含校验及数据库结算。尚无样本时三项为 null。 |
+
+状态接口只返回汇总数量，不包含账户、余额、任务 ID、图片、译文或密钥。访问状态页不会触发模型推理、查单或扣积分。
 
 ## 积分兑换码
 
@@ -113,6 +130,8 @@ dotnet Mugonzei.Server.dll codes revoke --id <生成记录的UUID>
 
 ## 爱发电与到账
 
+后台先持久保存通知里的交易号，再向爱发电签名查单。交易暂不可见或未完成时，后台按逐步延长的间隔重查，最长每小时一次，到首次入队满 24 小时为止。重启后继续核验。用户可以随时从原订单核验到账。
+
 真实收款需设置 `MUGONZEI_LIVE_PAYMENTS=true`、服务器专用 `AFDIAN_USER_ID` / `AFDIAN_TOKEN`、批准使用的 `AFDIAN_PAYMENT_BASE_URL` 与各套餐的 `afdianPlanId`。付款地址只接受 `afdian.com`、`ifdian.net`、`afdian.net` 的 HTTPS `/order/create`，禁止用户信息、额外查询串或非默认端口。
 
 真实收款和本机模拟都关闭时，`/v1/plans` 返回空列表，即使管理员已预先配置套餐，也不会在客户端显示可购买方案；创建订单仍返回充值未开放。积分兑换码不受此开关影响。
@@ -127,11 +146,13 @@ dotnet Mugonzei.Server.dll codes revoke --id <生成记录的UUID>
 
 管理员通过 `Translation__BaseUrl`、`Translation__ApiKey`、`Translation__Model` 配置 OpenAI 兼容的 Chat Completions 上游。密钥只在服务器；客户端不能指定上游、模型或覆盖提示词。`Translation__TimeoutSeconds`、`Translation__Concurrency`、`Translation__QueueCapacity` 控制预算和队列。未配置时服务可启动，但不接受付费翻译任务。
 
+公网客户端通过 HTTPS 将任务交给积分服务。Caddy 在同机终止 TLS 后，经回环连接转发到后台。后台使用自己的密钥连接上游，远程上游必须使用 HTTPS。本机 OCR 任务只发送原文和目标语言，图片与 AI 手写任务将 PNG 和目标语言一起提交，只请求一次模型并直接返回译文。账户密码、登录令牌和账务记录不进入模型请求。
+
 等待执行的任务使用有界先进先出队列。取消仍在排队的任务会立即移除其截图并释放队列名额，不必等待前面的模型请求结束；正在执行的任务继续按取消与成功结算的事务顺序处理。
 
 每账户和 requestId 绑定内容摘要。相同 ID/相同内容返回原任务，不重新扣分；同 ID/不同内容返回 409。开始执行前原子预留 1 分，成功后扣 1 分；无可读文字、失败或成功之前的取消释放预留。识图和 AI 手写翻译都只请求一次模型，直接返回译文；成功响应的 sourceText 为空字符串。文字模式保留传入的原文。已完成后取消、隐藏或重复读取结果不退费、不再收费。模型处理成本可能已产生，即使用户后来取消或模型失败，本版仍按上述规则释放积分。
 
-取消与成功由数据库事务先提交者决定；明确取消若先于上传入库到达，也会保留该账户/请求编号的取消标记，迟到提交不会执行或扣分。网络断开不等于取消，客户端应以相同 requestId 查询结果。重启将排队/执行中的任务失败释放，用户可使用新 ID 再请求。图片只在有界内存队列中，不写数据库；文本/译文保存供失败重连取回，终态满 7 天后由小时维护任务删除内容，保留去重摘要、状态及账务流水。过期结果不会重新执行同一任务。
+取消与成功由数据库事务先提交者决定；明确取消若先于上传入库到达，也会保留该账户/请求编号的取消标记，迟到提交不会执行或扣分。网络断开不等于取消，客户端应以相同 requestId 查询结果。重启将排队/执行中的任务失败释放，用户可使用新 ID 再请求。应用在内存中处理 PNG，SQLite 保存内容摘要。任务进入终态满 7 天后，启动时或每小时执行的维护任务会清空主库中的原文和译文，保留去重摘要、状态及账务流水。备份和上游模型服务商另有各自的保留策略。过期结果不会重新执行同一任务。
 
 ## 人工退款管理
 

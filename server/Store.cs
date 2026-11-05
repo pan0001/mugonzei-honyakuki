@@ -73,6 +73,7 @@ public sealed partial class Store
         InitializeEmailSchema(db);
         InitializeCouponSchema(db);
         InitializeAccountManagement(db);
+        InitializePaymentVerifications(db);
     }
 
     private SqliteConnection Open()

@@ -5,6 +5,7 @@ internal static partial class Program
 {
     private static async Task HostedScreenTextTests()
     {
+        await ScreenshotTransferTests();
         // Synthetic screen text: game dialogue between a performance overlay and desktop chrome.
         const string telemetry = "FPS N/A N/A | GPU 14 % 38 °C 1582 MHz 0.895 V 61 W | CPU 28 % 65 °C 5350 MHz | 延迟 N/A";
         const string dialogue = "听见啦。\n走吧，走吧，走吧。\n門の前で待っていて。";
@@ -102,9 +103,9 @@ internal static partial class Program
     {
         using var fixture = new Fixture();
         string user = fixture.User(1);
-        foreach (bool disconnect in new[] { false, true })
+        foreach (var (status, code) in new[] { (503, "upstream_unavailable"), (429, "upstream_rate_limited"), (0, "upstream_unavailable") })
         {
-            var handler = new UnavailableModelHandler(disconnect);
+            var handler = new UnavailableModelHandler(status);
             using var http = new HttpClient(handler);
             using var processor = new TranslationProcessor(Options(), http);
             using var service = Service(fixture.Store, processor);
@@ -112,9 +113,10 @@ internal static partial class Program
             try
             {
                 Guid id = Guid.NewGuid();
-                var input = TranslationInput.Validate(new(disconnect ? "handwriting" : "image", null, Pixel, "日本語"));
+                var input = TranslationInput.Validate(new(status == 0 ? "handwriting" : "image", null, Pixel, "日本語"));
                 service.Submit(user, id, input);
                 var result = await Terminal(service, user, id);
+                Equal(code, result.Error, "Rate limits and provider unavailability are distinguishable");
                 Check(result.Status == "failed" && result.Balance == 1 && fixture.Store.GetAccount(user).Reserved == 0,
                     "A provider disconnect or service error is terminal and releases the reservation");
                 Equal(result, service.Submit(user, id, input), "Client retries recover the failed result");
@@ -125,14 +127,14 @@ internal static partial class Program
         Equal(0, fixture.Store.GetLedger(user).Count(row => row.Kind == "translation"), "No failed image attempt creates a translation debit");
     }
 
-    private sealed class UnavailableModelHandler(bool disconnect) : HttpMessageHandler
+    private sealed class UnavailableModelHandler(int status) : HttpMessageHandler
     {
         internal int Requests { get; private set; }
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
         {
             Requests++;
-            if (disconnect) throw new HttpRequestException("Synthetic disconnect");
-            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.ServiceUnavailable));
+            if (status == 0) throw new HttpRequestException("Synthetic disconnect");
+            return Task.FromResult(new HttpResponseMessage((System.Net.HttpStatusCode)status));
         }
     }
 }

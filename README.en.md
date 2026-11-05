@@ -85,6 +85,8 @@ Capture and Translate sends a single model request in both direct image and AI h
 
 ### Credit service and Afdian
 
+The [service status page](https://mugonzei.top/status.html) shows active and queued jobs and the average time recent translations spent waiting, processing with the model, and saving the result and credit charge. If Afdian notifies the server before a payment can be verified, the server checks again automatically. You can track the payment on the original order.
+
 The public account backend is live. First-time setup selects 「账号积分服务（推荐）」 (Account Credit Service, Recommended) with `https://api.mugonzei.top` already filled in. Step two is for sign-in only; in the workspace, sign in under 「账号与 AI 服务 → 账号登录」 and use 「积分服务 → 打开积分服务」 to check your balance, top up, or redeem a code. You can open your credit account without changing your translation provider. The [website account center](https://mugonzei.top/account.html) uses the same account, balance, and records as the desktop app. Website session tokens remain only in the current page's memory; reloading or closing the page requires signing in again.
 
 New registrations require email verification. On the registration page reached from desktop sign-in or the website’s Create Account tab, enter your email, request a code, and enter the six digits from the message within ten minutes. The email code is separate from a credit redemption code. Existing users keep their balance and sign in with their original username and password. The website and desktop use the same official account server by default. If you select a custom server, its operator stores your account data.

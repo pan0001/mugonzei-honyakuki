@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -6,7 +7,11 @@ namespace Mugonzei.Server;
 
 public sealed class TranslationService : BackgroundService
 {
-    private sealed record Pending(string UserId, string Id, TranslationInput Input);
+    private sealed record Pending(string UserId, string Id, TranslationInput Input)
+    {
+        internal long EnqueuedAt { get; } = Stopwatch.GetTimestamp();
+    }
+    internal TranslationTimings Timings { get; } = new();
     private readonly Store store;
     private readonly ITranslationProcessor processor;
     private readonly TranslationOptions options;
@@ -28,9 +33,17 @@ public sealed class TranslationService : BackgroundService
         queueCapacity = Math.Clamp(options.QueueCapacity, 1, 64);
     }
 
+    internal (string State, PublicQueueState Queue) InspectQueue()
+    {
+        lock (queueGate)
+            return (!accepting ? "stopping" : !processor.IsAvailable ? "disabled" : options.Mock ? "simulated" : "configured",
+                new PublicQueueState(active.Count, Math.Clamp(options.Concurrency, 1, 8), queue.Count, queueCapacity));
+    }
+
     public TranslationTaskDto Submit(string userId, Guid id, TranslationInput input)
     {
-        string key = id.ToString("D"), hash = input.BodyHash();
+        string metadata = input.PersistenceJson();
+        string key = id.ToString("D"), hash = TranslationInput.HashMetadata(metadata);
         try
         {
             var existing = store.GetTranslation(userId, key);
@@ -40,7 +53,7 @@ public sealed class TranslationService : BackgroundService
         }
         catch (ApiException error) when (error.StatusCode == 404) { }
         if (!processor.IsAvailable) throw new ApiException(503, "service_unavailable", "官方翻译服务尚未配置，请稍后再试。");
-        var reservation = store.ReserveTranslation(userId, key, hash, input.PersistenceJson());
+        var reservation = store.ReserveTranslation(userId, key, hash, metadata);
         if (!reservation.Created) return TranslationTaskDto.From(reservation.Job);
         lock (queueGate)
         {
@@ -49,7 +62,10 @@ public sealed class TranslationService : BackgroundService
             // leave a screenshot or capacity reservation behind in this queue.
             var job = store.GetTranslation(userId, key);
             if (job.Status != "queued") return TranslationTaskDto.From(job);
-            if (!accepting || queue.Count >= queueCapacity)
+            // One account can use up to half the waiting places (rounded up). Running work
+            // does not count; an idle service can still start consecutive submissions.
+            if (!accepting || queue.Count >= queueCapacity ||
+                queue.Count(pending => pending.UserId == userId) >= (queueCapacity + 1) / 2)
                 return TranslationTaskDto.From(store.FailTranslation(userId, key, "failed", accepting ? "queue_full" : "server_stopped"));
             queued.Add((userId, key), queue.AddLast(new Pending(userId, key, input)));
             queueReady.Release();
@@ -119,11 +135,16 @@ public sealed class TranslationService : BackgroundService
                 {
                     if (!store.StartTranslation(pending.UserId, pending.Id)) continue;
                     cancellation.Token.ThrowIfCancellationRequested();
+                    long modelStart = Stopwatch.GetTimestamp();
                     var result = await processor.ProcessAsync(pending.Input, cancellation.Token);
+                    long settlementStart = Stopwatch.GetTimestamp();
                     cancellation.Token.ThrowIfCancellationRequested();
                     result.Validate(pending.Input.Mode);
-                    store.CompleteTranslation(pending.UserId, pending.Id,
+                    var settled = store.CompleteTranslation(pending.UserId, pending.Id,
                         JsonSerializer.Serialize(result, TranslationInput.Json), charge: !result.NoText);
+                    if (settled.Status is "succeeded" or "no_text")
+                        Timings.Add(Stopwatch.GetElapsedTime(pending.EnqueuedAt, modelStart),
+                            Stopwatch.GetElapsedTime(modelStart, settlementStart), Stopwatch.GetElapsedTime(settlementStart));
                 }
                 catch (OperationCanceledException)
                 {
@@ -132,6 +153,7 @@ public sealed class TranslationService : BackgroundService
                 }
                 catch (TranslationProcessingException error)
                 {
+                    logger.LogWarning("Translation processing failed with {Code}", error.Code);
                     store.FailTranslation(pending.UserId, pending.Id, "failed", error.Code);
                 }
                 catch (Exception)
@@ -170,6 +192,7 @@ public static class TranslationEndpoints
         if (options.Mock && !environment.IsDevelopment())
             throw new InvalidOperationException("Translation:Mock 只能在 Development 环境启用。");
         services.TryAddSingleton(options);
+        services.TryAddSingleton(_ => new TranslationUploadGate(TimeSpan.FromSeconds(60)));
         services.TryAddSingleton<ITranslationProcessor>(_ => options.Mock
             ? new DevelopmentTranslationProcessor() : new TranslationProcessor(options));
         services.AddSingleton<TranslationService>();
@@ -178,23 +201,22 @@ public static class TranslationEndpoints
 
     public static void MapTranslationEndpoints(WebApplication app)
     {
-        app.MapPut("/v1/translations/{requestId:guid}", async (Guid requestId, HttpContext context, TranslationService service) =>
+        app.MapPut("/v1/translations/{requestId:guid}", async (Guid requestId, HttpContext context, TranslationService service, TranslationUploadGate uploads) =>
         {
             string userId = AuthService.UserId(context);
             if (context.Request.ContentLength > TranslationInput.MaxRequestBytes)
                 throw new ApiException(413, "request_too_large", "截图请求过大。");
-            TranslationRequest? request;
+            TranslationInput input;
             try
             {
-                byte[] body = await TranslationStreams.ReadBoundedAsync(context.Request.Body, TranslationInput.MaxRequestBytes, context.RequestAborted);
-                request = JsonSerializer.Deserialize<TranslationRequest>(body, TranslationInput.Json);
+                input = await uploads.ReadAsync(userId, context);
             }
             catch (TranslationProcessingException)
             { throw new ApiException(413, "request_too_large", "截图请求过大。"); }
             catch (JsonException)
             { throw new ApiException(400, "invalid_request", "翻译请求格式无效。"); }
-            if (request is null) throw new ApiException(400, "invalid_request", "翻译请求不能为空。");
-            var result = service.Submit(userId, requestId, TranslationInput.Validate(request));
+            context.RequestAborted.ThrowIfCancellationRequested();
+            var result = service.Submit(userId, requestId, input);
             // RequestAborted is intentionally never forwarded to accepted background work.
             return Results.Json(result, statusCode: result.Status is "queued" or "running" ? 202 : 200);
         }).RequireRateLimiting("translation-submit");

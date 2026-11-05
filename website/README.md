@@ -14,6 +14,8 @@
 
 ## 服务状态与下载
 
+「最近翻译耗时」显示本次启动以来最近最多 32 笔已完成任务的分段平均值，包括排队、模型处理和结果入账。服务重启后从第一笔完成的任务重新统计。
+
 状态页匿名读取同源 `GET /v1/status`。如果后台提供详细报告，可查看运行时间、账户数据库读检查、翻译与充值配置、队列。旧后台返回 404 时，只读取公开的 `GET /v1/plans` 验证套餐接口是否可达；未报告的项目显示「未提供」，不能据此判断付款或 AI 上游是否可用。页面不运行试译或支付，不访问个人数据。页面可见且在线时可选每 30 秒刷新，探测失败显示「当前状态未知」。
 
 官网主按钮从本站 `/downloads/<tag>/` 下载 Windows x64 安装 EXE；本站与 GitHub Release 提供相同字节与 SHA-256。安装后从开始菜单启动，设置和密钥沿用原用户的数据目录。无法访问本站镜像时可使用 GitHub 备用下载；便携 ZIP 需要完整解压，GitHub 的 `Source code` 供自行构建。[v0.2.7-preview 发布页](https://github.com/pan0001/mugonzei-honyakuki/releases/tag/v0.2.7-preview) · [GitHub 版本记录](https://github.com/pan0001/mugonzei-honyakuki/releases)

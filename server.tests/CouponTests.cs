@@ -128,8 +128,8 @@ internal static partial class Program
             service.ApplyVerified(verified with { Status = 1 }) is null, "Unrelated and unpaid notifications cannot credit");
         Equal(0L, upgraded.GetAccount(user).Balance, "Invalid claims and mere coupons add no credits");
         gateway.Orders = [verified];
-        await service.NotifyAsync(verified.TradeNo, default);
-        await service.NotifyAsync(verified.TradeNo, default);
+        await service.VerifyNotificationAsync(verified.TradeNo, default);
+        await service.VerifyNotificationAsync(verified.TradeNo, default);
         Equal(300L, upgraded.GetAccount(user).Balance, "The verified discounted first recharge grants the base and bonus once, even after coupon revocation");
         Equal(1, upgraded.GetLedger(user).Count, "Provider retries produce one ledger entry");
         Throws(409, () => service.ApplyVerified(verified with { CustomId = otherOrder.CustomId }));

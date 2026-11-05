@@ -65,6 +65,17 @@ async function main() {
   assert.equal(el('waiting-meter').max, 16);
   assert.equal(el('checked-at').dateTime, '2026-11-05T08:45:31.123Z');
   assert.equal(el('refresh-status').disabled, false);
+  assert.equal(el('timing-values').hidden, true);
+  transport = async () => json({ ...sample, timings: { samples: 2, queueMs: 22, modelMs: 19750, settlementMs: 0.2 } });
+  await refresh();
+  assert.equal(el('timing-values').hidden, false);
+  assert.equal(el('model-ms').textContent, '19.8 秒');
+  assert.match(el('timing-note').textContent, /2 笔/);
+  for (const timings of [{ samples: 0 }, { samples: 1, queueMs: 0, modelMs: null, settlementMs: 0 }]) {
+    transport = async () => json({ ...sample, timings });
+    await refresh();
+    assert.equal(el('timing-values').hidden, true);
+  }
 
   transport = async () => json({ ...sample, status: 'degraded', storage: 'unavailable', translation: 'stopping' }, 503);
   await fire(30_000);
