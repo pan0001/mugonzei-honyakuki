@@ -23,6 +23,8 @@ internal static class Payload
 
     static int Main(string[] args)
     {
+        AppContext.SetSwitch("Switch.System.IO.UseLegacyPathHandling", false);
+        AppContext.SetSwitch("Switch.System.IO.BlockLongPaths", false);
         try
         {
             if (args.Length == 2 && args[0] == "remove") Remove(Root(args[1]));
@@ -45,8 +47,11 @@ internal static class Payload
         string settings = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "SteamVrTranslator");
         if (!Regex.IsMatch(root, @"^[A-Za-z]:\\.+") || SameOrBelow(settings, root) || SameOrBelow(root, settings))
             throw new InvalidDataException("Choose a dedicated application directory outside your settings folder.");
-        CheckLinks(root);
-        return root;
+        // Embedded Python has deep package paths. Extended paths also work when the
+        // machine-wide Win32 long-path policy has not been enabled by an administrator.
+        string extended = @"\\?\" + root;
+        CheckLinks(extended);
+        return extended;
     }
 
     static void CheckLinks(string path)
@@ -215,7 +220,7 @@ internal static class Payload
 
     static void RequireAppClosed(string app)
     {
-        string executable = Path.Combine(app, "SteamVrTranslator.exe");
+        string executable = Path.Combine(app, "SteamVrTranslator.exe").Substring(4);
         foreach (var process in Process.GetProcessesByName("SteamVrTranslator"))
         {
             using (process)
