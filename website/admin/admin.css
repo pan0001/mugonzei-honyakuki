@@ -21,3 +21,33 @@ input,select,textarea { display:block; width:100%; min-width:0; padding:10px; fo
 dialog { width:min(420px,calc(100vw - 28px)); max-height:calc(100vh - 32px); overflow:auto; padding:23px; color:var(--ink); background:white; border:1px solid var(--line); border-radius:12px; } dialog::backdrop { background:#24203280; }
 dl { margin:15px 0; } dl div { display:grid; grid-template-columns:100px minmax(0,1fr); gap:12px; padding:5px 0; } dd { margin:0; overflow-wrap:anywhere; } #reviewMessage:not(:empty) { margin-bottom:13px; }
 @media(max-width:600px) { .wrap { width:calc(100% - 28px); } main { padding-top:22px; } .card { padding:17px; } .grid { grid-template-columns:1fr; } .record { grid-template-columns:1fr; } .record button { justify-self:start; } }
+.metric-link { padding:0 4px 0 0; min-height:auto; border:0; color:var(--accent); background:transparent; font:inherit; }
+.metric-link:enabled:hover { background:transparent; text-decoration:underline; }
+nav { flex-wrap:wrap; gap:2px; }
+.account-search { display:flex; align-items:end; gap:8px; flex-wrap:wrap; }
+.account-search label { flex:1 1 200px; }
+.account-search>button { margin:0; }
+.account-status { min-height:1.55em; margin:13px 0 5px; font-size:14px; }
+.account-status:empty { display:none; }
+.account-id,#accountName { overflow-wrap:anywhere; }
+.account-id { font-size:13px; }
+.account-record { display:flex; gap:16px; align-items:center; justify-content:space-between; border-top:1px solid var(--line); padding:14px 0; }
+.account-record>div { min-width:0; }
+.account-record h3,.account-record p { overflow-wrap:anywhere; }
+.account-record p { font-size:13px; }
+.account-record button { flex-shrink:0; }
+.account-meta { text-align:end; }
+.pager,.detail-bar { display:flex; gap:8px; align-items:center; justify-content:space-between; flex-wrap:wrap; }
+.pager:not(:empty) { border-top:1px solid var(--line); margin-top:4px; padding-top:12px; }
+.pager span { color:var(--muted); font-size:13px; }
+.detail-bar { margin-bottom:12px; }
+#accountMetrics { gap:10px 26px; }
+#actionFields label { margin-bottom:12px; }
+#actionMessage:not(:empty) { margin:12px 0; }
+#actionTarget { margin-top:6px; }
+@media(max-width:600px) {
+  nav button { padding-inline:10px; }
+  .account-record { gap:6px 12px; flex-wrap:wrap; }
+  .account-record>div:first-child { flex:1 1 100%; }
+  .account-meta { text-align:start; }
+}

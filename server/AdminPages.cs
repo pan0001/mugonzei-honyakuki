@@ -6,6 +6,7 @@ internal static class AdminPages
     {
         MapAsset("/admin", "index.html", "text/html; charset=utf-8");
         MapAsset("/admin/admin.js", "admin.js", "text/javascript; charset=utf-8");
+        MapAsset("/admin/accounts.js", "accounts.js", "text/javascript; charset=utf-8");
         MapAsset("/admin/admin.css", "admin.css", "text/css; charset=utf-8");
 
         void MapAsset(string path, string name, string contentType)
@@ -13,6 +14,7 @@ internal static class AdminPages
             app.MapGet(path, (HttpContext context) =>
             {
                 if (!allowed(context)) return Results.NotFound();
+                context.Response.Headers.CacheControl = "no-store";
                 context.Response.Headers.ContentSecurityPolicy =
                     "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self'; " +
                     "base-uri 'none'; form-action 'self'; frame-ancestors 'none'; object-src 'none'";

@@ -4,8 +4,8 @@
   <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex,nofollow"><meta name="referrer" content="no-referrer">
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
-  <title>积分管理 · 无言势翻译器</title>
-  <link rel="stylesheet" href="/admin/admin.css"><script defer src="/admin/admin.js"></script>
+  <title>运营管理 · 无言势翻译器</title>
+  <link rel="stylesheet" href="/admin/admin.css"><script defer src="/admin/accounts.js"></script><script defer src="/admin/admin.js"></script>
 </head>
 <body>
 <header><div class="wrap top"><div class="brand"><span class="mark" aria-hidden="true">無</span><span>无言势翻译器</span></div><button type="button" class="light" id="logout" hidden>退出管理</button></div></header>
@@ -19,10 +19,31 @@
   </section>
   <p id="notice" class="notice" role="status" aria-live="polite" tabindex="-1">正在检查管理会话…</p>
   <div id="workspace" hidden>
-    <h1>积分管理</h1>
-    <dl class="overview" aria-label="运营概览"><div><dt>注册账户</dt><dd id="accounts">—</dd></div><div><dt>已付订单</dt><dd id="paidOrders">—</dd></div><div><dt>已付金额</dt><dd id="paidAmount">—</dd></div></dl>
-    <nav aria-label="管理内容"><button id="couponTab" aria-current="page" aria-controls="couponPage" type="button">优惠活动</button><button id="redemptionTab" aria-controls="redemptionPage" type="button">积分兑换码</button></nav>
-    <section id="couponPage" aria-labelledby="couponTab">
+    <h1>运营管理</h1>
+    <dl class="overview" aria-label="运营概览"><div><dt>注册账号</dt><dd><button id="openAccounts" class="metric-link" aria-label="查看全部注册账号" type="button"><span id="accounts">—</span> <span aria-hidden="true">→</span></button></dd></div><div><dt>已付订单</dt><dd id="paidOrders">—</dd></div><div><dt>已付金额</dt><dd id="paidAmount">—</dd></div></dl>
+    <nav aria-label="管理内容"><button id="accountTab" aria-current="page" aria-controls="accountPage" type="button">账号管理</button><button id="couponTab" aria-controls="couponPage" type="button">优惠活动</button><button id="redemptionTab" aria-controls="redemptionPage" type="button">积分兑换码</button></nav>
+    <section id="accountPage" aria-labelledby="accountTab">
+      <section class="card" id="accountDirectory">
+        <div class="row"><h2 tabindex="-1" id="accountHeading">账号列表</h2><button type="button" id="refreshAccounts" class="light">刷新列表</button></div>
+        <form id="accountSearchForm" class="account-search" method="post" autocomplete="off">
+          <label for="accountSearch">查找账号<input id="accountSearch" type="search" maxlength="64" placeholder="用户名或完整账号 ID" spellcheck="false" autocapitalize="off"></label>
+          <button type="submit">搜索</button><button type="button" id="resetSearch" class="light" hidden>清除</button>
+        </form>
+        <p id="directoryStatus" class="account-status" role="status" aria-live="polite"></p>
+        <div id="accountList"></div><div class="pager" id="accountPager"></div>
+      </section>
+      <section id="accountDetail" hidden>
+        <div class="detail-bar"><button type="button" id="backAccounts" class="light">← 返回账号列表</button><button type="button" id="refreshDetail" class="light">刷新明细</button></div>
+        <section class="card"><h2 id="accountName" tabindex="-1">账号明细</h2><p class="account-id" id="accountId"></p>
+          <p id="detailStatus" class="account-status" role="status" aria-live="polite"></p><dl class="overview" id="accountMetrics"></dl>
+          <div class="actions" id="accountTools" hidden><button type="button" id="adjustCredits">调整积分</button><button type="button" class="light" id="toggleAccount"></button><button type="button" class="light" id="retryAction" hidden>核对上次操作</button></div>
+        </section>
+        <section class="card"><h2>充值订单</h2><div id="accountOrders" class="records"></div><div class="pager" id="orderPager"></div></section>
+        <section class="card"><h2>积分流水</h2><div id="accountLedger" class="records"></div><div class="pager" id="ledgerPager"></div></section>
+        <section class="card"><h2>管理操作记录</h2><div id="accountAudit" class="records"></div><div class="pager" id="auditPager"></div></section>
+      </section>
+    </section>
+    <section id="couponPage" aria-labelledby="couponTab" hidden>
       <section class="card"><h2>创建优惠活动</h2>
         <p>先在爱发电建立独立的折扣方案，确保其单月价格与这里的折后价一致。</p>
         <form id="couponForm" method="post" autocomplete="off">
@@ -62,5 +83,19 @@
   <h2 id="reviewTitle"></h2><dl id="summary"></dl>
   <p id="reviewMessage" role="status" aria-live="polite"></p>
   <div class="actions"><button type="button" id="confirm">确认</button><button type="button" id="back" class="light">返回</button></div>
+</dialog>
+<dialog id="actionDialog" aria-labelledby="actionTitle">
+  <h2 id="actionTitle"></h2><p id="actionTarget" class="account-id"></p>
+  <form id="actionForm" method="post" autocomplete="off">
+    <div id="actionFields">
+      <div id="adjustFields" class="grid">
+        <label>调整方向<select id="adjustDirection"><option value="add">增加积分</option><option value="subtract">扣减积分</option></select></label>
+        <label>积分数量<input id="adjustAmount" type="number" min="1" max="1000000" step="1" inputmode="numeric"></label>
+      </div>
+      <label>操作原因<textarea id="actionReason" rows="2" maxlength="200" placeholder="填写原因，保存到管理操作记录"></textarea></label>
+    </div>
+    <dl id="actionReview"></dl><p id="actionMessage" role="status" aria-live="polite"></p>
+    <div class="actions"><button type="submit" id="actionSubmit">核对操作</button><button type="button" class="light" id="actionClose">取消</button></div>
+  </form>
 </dialog>
 </body></html>

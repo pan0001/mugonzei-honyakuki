@@ -7,6 +7,7 @@
   const date = new Intl.DateTimeFormat('zh-CN', {dateStyle:'short', timeStyle:'short'});
   let epoch = 0, loggedIn = false, authBusy = false, writing = false;
   let plans = [], review = null;
+  const accounts = window.createAccountManager({api,el,money,when,summary:() => refresh('summary')});
 
   function notice(text = '', error = false) {
     $('notice').textContent = text;
@@ -27,6 +28,7 @@
   }
   function signOut(text = '') {
     epoch++; loggedIn = false; keys.clear(); latest.clear(); plans = [];
+    accounts.reset();
     closeReview(); clearIssued();
     for (const id of ['couponForm','redemptionForm','loginForm']) $(id).reset();
     updateRedemptionCodeField();
@@ -141,19 +143,20 @@
       else listUnavailable(key);
     }
   }
-  function chooseTab(kind) {
+  function chooseTab(kind, allAccounts = false) {
     if (!loggedIn) return;
-    for (const [value,tab,page] of [['coupons','couponTab','couponPage'],['redemptions','redemptionTab','redemptionPage']]) {
+    for (const [value,tab,page] of [['accounts','accountTab','accountPage'],['coupons','couponTab','couponPage'],['redemptions','redemptionTab','redemptionPage']]) {
       const selected = value === kind;
       $(page).hidden = !selected;
       if (selected) $(tab).setAttribute('aria-current','page'); else $(tab).removeAttribute('aria-current');
     }
-    return refresh(kind);
+    if (kind === 'accounts') return accounts.enter(allAccounts);
+    accounts.leave(); return refresh(kind);
   }
   function signedIn() {
     epoch++; loggedIn = true; $('login').hidden = true; $('workspace').hidden = false; $('logout').hidden = false;
-    notice(); $('couponTab').focus();
-    return Promise.all([refresh('plans'), refresh('summary'), chooseTab('coupons')]);
+    notice(); $('accountTab').focus();
+    return Promise.all([refresh('plans'), refresh('summary'), chooseTab('accounts')]);
   }
   async function session() {
     const stamp = epoch;
@@ -309,7 +312,9 @@
   $('review').addEventListener('cancel', event => { event.preventDefault(); if (!writing) closeReview(); });
   $('back').addEventListener('click', () => { if (!writing) closeReview(); });
   $('selectCodes').addEventListener('click', () => { $('codes').focus(); $('codes').select(); });
-  $('dismissCodes').addEventListener('click', () => { clearIssued(); ($('couponPage').hidden ? $('redemptionTab') : $('couponTab')).focus(); });
+  $('dismissCodes').addEventListener('click', () => { clearIssued(); ($('accountPage').hidden ? ($('couponPage').hidden ? $('redemptionTab') : $('couponTab')) : $('accountTab')).focus(); });
+  $('accountTab').addEventListener('click', () => chooseTab('accounts'));
+  $('openAccounts').addEventListener('click', () => { const list = chooseTab('accounts',true); $('accountHeading').focus(); return list; });
   $('couponTab').addEventListener('click', () => chooseTab('coupons'));
   $('redemptionTab').addEventListener('click', () => chooseTab('redemptions'));
   $('refreshCoupons').addEventListener('click', () => { if (loggedIn) return Promise.all([refresh('plans'),refresh('coupons'),refresh('summary')]); });

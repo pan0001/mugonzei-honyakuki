@@ -44,6 +44,7 @@ internal static partial class Program
 
     private static async Task AdminEndpointTests()
     {
+        await AdminAccountQueryTests();
         using var fixture = new Fixture();
         const string session = "/admin/api/session", coupons = "/admin/api/coupons";
         string secret = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));

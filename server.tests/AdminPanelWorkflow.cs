@@ -10,12 +10,13 @@ internal static partial class Program
     // Exercise the operator page and the ordinary customer's checkout against one running store.
     private static async Task AdminPanelWorkflow()
     {
+        await AdminAccountMutationTests();
         using var fixture = new Fixture();
         var plan = new Plan("small", "200 积分", 200, 500, new string('a', 32));
         string adminToken = Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
         await AdminFixture.RunAsync(fixture.Path, [plan], adminToken, async admin =>
         {
-            foreach (var (path, contentType) in new[] { ("admin/", "text/html"), ("admin/admin.css", "text/css"), ("admin/admin.js", "text/javascript") })
+            foreach (var (path, contentType) in new[] { ("admin/", "text/html"), ("admin/admin.css", "text/css"), ("admin/admin.js", "text/javascript"), ("admin/accounts.js", "text/javascript") })
             {
                 using var asset = await admin.GetAsync(path);
                 Equal(HttpStatusCode.OK, asset.StatusCode, "Serves admin asset with embedded server build");

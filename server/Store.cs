@@ -56,6 +56,7 @@ public sealed partial class Store
         InitializeRedemptionSchema(db);
         InitializeEmailSchema(db);
         InitializeCouponSchema(db);
+        InitializeAccountManagement(db);
     }
 
     private SqliteConnection Open()
@@ -97,13 +98,20 @@ public sealed partial class Store
     }
     public void CreateSession(string userId, string tokenHash, DateTimeOffset expiresAt)
     {
-        using var db = Open(); Execute(db, null, "INSERT INTO sessions(token_hash,user_id,expires_at) VALUES($hash,$user,$expiry)",
-            ("$hash", tokenHash), ("$user", userId), ("$expiry", expiresAt.ToString("O", CultureInfo.InvariantCulture)));
+        using var db = Open();
+        if (Execute(db, null, """
+            INSERT INTO sessions(token_hash,user_id,expires_at)
+            SELECT $hash,$user,$expiry WHERE NOT EXISTS (SELECT 1 FROM account_suspensions WHERE user_id=$user)
+            """, ("$hash", tokenHash), ("$user", userId), ("$expiry", expiresAt.ToString("O", CultureInfo.InvariantCulture))) == 0)
+            throw AccountDisabled();
     }
     public string? FindSession(string tokenHash, DateTimeOffset now)
     {
         using var db = Open(); using var command = Command(db, null,
-            "SELECT user_id FROM sessions WHERE token_hash=$hash AND expires_at>$now",
+            """
+            SELECT s.user_id FROM sessions s WHERE s.token_hash=$hash AND s.expires_at>$now
+                AND NOT EXISTS (SELECT 1 FROM account_suspensions a WHERE a.user_id=s.user_id)
+            """,
             ("$hash", tokenHash), ("$now", now.ToString("O", CultureInfo.InvariantCulture)));
         return command.ExecuteScalar() as string;
     }
@@ -139,6 +147,7 @@ public sealed partial class Store
     {
         string? hash = couponCode is null ? null : CouponHash(couponCode);
         requestId = Id(requestId); using var db = Open(); using var tx = db.BeginTransaction();
+        RequireEnabled(db, tx, userId);
         var existing = ReadOrder(db, tx, "user_id=$user AND request_id=$request", ("$user", userId), ("$request", requestId));
         if (existing is not null)
         {
@@ -262,6 +271,7 @@ public sealed partial class Store
     public (TranslationJob Job, bool Created) ReserveTranslation(string userId, string requestId, string bodyHash, string inputJson)
     {
         requestId = Id(requestId); using var db = Open(); using var tx = db.BeginTransaction();
+        RequireEnabled(db, tx, userId);
         var existing = ReadTranslation(db, tx, userId, requestId);
         if (existing is not null)
         {

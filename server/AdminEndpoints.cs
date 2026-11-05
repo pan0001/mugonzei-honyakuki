@@ -58,6 +58,8 @@ public static class AdminEndpoints
         });
         admin.MapPost("/coupons/{id}/revoke", (string id, Store store) => new { id, revoked = store.RevokeCoupon(id) });
         AdminRedemptions.Map(admin);
+        AdminAccounts.Map(admin);
         AdminSummary.Map(admin);
+        AdminAccountActions.Map(admin);
     }
 }

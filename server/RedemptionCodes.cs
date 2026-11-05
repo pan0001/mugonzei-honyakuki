@@ -196,6 +196,7 @@ public sealed partial class Store
     {
         string hash = CodeHash(code);
         using var db = Open(); using var tx = db.BeginTransaction();
+        RequireEnabled(db, tx, userId);
         var account = Account(db, tx, userId);
         var row = ReadCode(db, tx, "code_hash", hash) ?? throw UnavailableCode();
         string reference = "redemption:" + row.Id;

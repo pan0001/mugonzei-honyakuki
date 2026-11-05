@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk.Web">
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
-    <Version>0.2.6-preview</Version>
+    <Version>0.2.7-preview</Version>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <InvariantGlobalization>true</InvariantGlobalization>
@@ -13,7 +13,7 @@
     <Content Include="licenses/**/*" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="README.md;configuration.example.txt" CopyToPublishDirectory="PreserveNewest" />
     <Content Include="ADMIN.md;COUPONS.md" CopyToPublishDirectory="PreserveNewest" />
-    <EmbeddedResource Include="../website/admin/index.html;../website/admin/admin.css;../website/admin/admin.js"
+    <EmbeddedResource Include="../website/admin/index.html;../website/admin/admin.css;../website/admin/admin.js;../website/admin/accounts.js"
                       LogicalName="Mugonzei.Admin.%(Filename)%(Extension)" />
     <Content Include="deploy/README.md;deploy/mugonzei.service;deploy/server.env.example;deploy/build-sqlite-linux.py;deploy/Caddyfile.example;deploy/caddy.service" CopyToPublishDirectory="PreserveNewest" />
     <Compile Remove="tests/**/*.cs" />

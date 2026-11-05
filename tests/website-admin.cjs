@@ -4,6 +4,7 @@ const assert = require('node:assert/strict'), crypto = require('node:crypto');
 const dir = path.join(__dirname,'../website/admin');
 const html = fs.readFileSync(path.join(dir,'index.html'),'utf8');
 const js = fs.readFileSync(path.join(dir,'admin.js'),'utf8');
+const accountsJs = fs.readFileSync(path.join(dir,'accounts.js'),'utf8');
 class Control {
   constructor(tag) { this.tag=tag; this.children=[]; this.listeners={}; this.attrs={}; this.dataset={}; this.value=''; this.textContent=''; this.hidden=false; this.disabled=false; }
   append(...els) { this.children.push(...els); }
@@ -38,6 +39,42 @@ const redemptions=()=>[{...redemption,code:'SHOULD-NOT-RENDER'},used,
   {...redemption,id:'0'.repeat(32),mode:'oncePerAccount',claimCount:7},
   {...redemption,id:'1'.repeat(32),status:'revoked'}, {...redemption,id:'2'.repeat(32),expiresAt:'2000-01-01',status:'redeemed'}];
 const ok=(data,status=200)=>({ok:status>=200&&status<300,status,json:async()=>data});
+const fixtureId = 'a'.repeat(32);
+function accountServer() {
+  const primary = {id:fixtureId,username:'练习账号',disabled:false,balance:105,reserved:5,available:100};
+  const others = Array.from({length:20},(_,i)=>({...primary,id:(i+1).toString(16).padStart(32,'0'),username:'模拟'+i}));
+  const rows = [primary,...others];
+  const date='2026-11-05T11:20:00Z';
+  const orders = Array.from({length:12},(_,i)=>({id:'order-'+i,name:'体验套餐 '+i,credits:200,amountFen:500,status:'paid',createdAt:date}));
+  const ledger = Array.from({length:13},(_,i)=>({id:i,kind:'redemption',amount:100,balance:100,createdAt:date}));
+  const applied = new Map(), audit = [];
+  return function serve(route,method,body,key) {
+    const url = new URL(route,'https://fixture.invalid/');
+    const [resource,id,history] = url.pathname.slice(1).split('/');
+    if (resource!=='accounts') return null;
+    const page = (items,param='page') => {
+      const n=Number(url.searchParams.get(param)||1), limit=Number(url.searchParams.get('pageSize')||10);
+      return {items:items.slice((n-1)*limit,n*limit),total:items.length,page:n,pageSize:limit};
+    };
+    if (!id) {
+      const search = url.searchParams.get('q') || '';
+      return ok(page(rows.filter(item=>item.username.includes(search)||item.id===search)));
+    }
+    const account = rows.find(item=>item.id===id);
+    if (!account) return ok({},404);
+    if (!history) return ok({account:{...account},orders:page(orders,'orderPage'),ledger:page(ledger,'ledgerPage')});
+    assert.equal(history,'actions');
+    if (method==='GET') return ok(page(audit));
+    assert.match(key,/^[a-f0-9-]{36}$/);
+    if (applied.has(key)) { assert.deepEqual(body,applied.get(key)); return ok({...account,...body,alreadyApplied:true}); }
+    applied.set(key,body); account.balance+=body.delta; account.available+=body.delta;
+    if (body.action!=='adjust') account.disabled=body.action==='suspend';
+    audit.unshift({...body,balanceAfter:account.balance,createdAt:date});
+    return ok({...body,balance:account.balance,available:account.available,reserved:account.reserved,disabled:account.disabled,alreadyApplied:false});
+  };
+}
+const serveAccounts=accountServer();
+let interceptAccount;
 let session=false, summaryOffline=false, couponReply, batchReply, listReply;
 async function transport(url,opts) {
   assert(url.startsWith('/admin/api/')); assert.equal(opts.credentials,'same-origin'); assert.equal(opts.mode,'same-origin'); assert.equal(opts.redirect,'error'); assert.equal(opts.cache,'no-store');
@@ -50,7 +87,8 @@ async function transport(url,opts) {
     return ok({authenticated:session});
   }
   assert(session,'The client calls protected endpoints only in an authenticated session');
-  if(route==='summary')return summaryOffline?ok({},503):ok({accounts:12,paidOrders:2,paidAmountFen:2587});
+  if(route==='summary')return summaryOffline?ok({},503):ok({accounts:21,paidOrders:2,paidAmountFen:2587});
+  if(route.startsWith('accounts'))return interceptAccount?.(route,opts.method,body,key) || serveAccounts(route,opts.method,body,key);
   if(route==='plans')return ok([plan]);
   if(opts.method==='GET'&&route==='coupons')return listReply?listReply():ok([{...coupon,code:'SHOULD-NOT-RENDER'}]);
   if(opts.method==='GET'&&route==='redemptions')return ok(redemptions());
@@ -66,18 +104,66 @@ async function transport(url,opts) {
 }
 const document={getElementById:$,createElement:t=>new Control(t)};
 const context=vm.createContext({document,window:win,fetch:transport,crypto,Intl,Date,AbortController,setTimeout,clearTimeout});
-vm.runInContext(js,context);
+vm.runInContext(accountsJs,context); vm.runInContext(js,context);
 const tick=()=>new Promise(resolve=>setImmediate(resolve));
 const evt={preventDefault(){}}, submit=id=>$(id).listeners.submit(evt), click=id=>$(id).listeners.click();
 const flatten=c=>[c,...c.children.flatMap(flatten)];
 const content=id=>flatten($(id)).map(x=>x.textContent).join('|');
 const posts=route=>calls.filter(c=>c.method==='POST'&&c.route===route);
 async function login(){ $('token').value=token; await submit('loginForm'); }
+async function accountTests() {
+  const button=(id,label)=>flatten($(id)).find(c=>c.tag==='button' && c.textContent===label);
+  assert.equal($('accountPage').hidden,false);
+  assert.equal(flatten($('accountList')).filter(n=>n.tag==='button').length,20);
+  await button('accountPager','下一页').listeners.click();
+  assert.equal(flatten($('accountList')).filter(n=>n.tag==='button').length,1);
+  $('accountSearch').value='不存在'; await submit('accountSearchForm'); assert.match(content('directoryStatus'),/没有找到/);
+  let late;
+  interceptAccount=route=>route.includes('q=late')?new Promise(resolve=>{late=resolve;}):null;
+  $('accountSearch').value='late'; const older=submit('accountSearchForm');
+  $('accountSearch').value=fixtureId; await submit('accountSearchForm');
+  late(ok({items:[],total:0,page:1,pageSize:20})); await older; interceptAccount=null;
+  assert(content('accountList').includes('练习账号'));
+  await button('accountList','查看明细').listeners.click();
+  assert.equal($('accountName').textContent,'练习账号'); assert(content('accountMetrics').includes('预留积分'));
+  assert(content('accountOrders').includes('¥5.00')); assert(content('accountLedger').includes('兑换码入账'));
+  await button('orderPager','下一页').listeners.click(); assert(content('accountOrders').includes('体验套餐 11'));
+  await button('ledgerPager','下一页').listeners.click(); assert(content('orderPager').includes('2 / 2'));
+  await click('adjustCredits'); $('adjustDirection').value='subtract'; $('adjustAmount').value='101'; $('actionReason').value='核对奖励';
+  await submit('actionForm'); assert(content('actionMessage').includes('超过当前可用'));
+  $('adjustAmount').value='7'; await submit('actionForm');
+  assert(content('actionReview').includes('-7')); assert(content('actionTarget').includes(fixtureId));
+  const endpoint='accounts/'+fixtureId+'/actions';
+  assert.equal(posts(endpoint).length,0,'No change until the operator confirms amount, recipient and reason');
+  let lose;
+  interceptAccount=(route,method,body,key)=>{
+    if(route!==endpoint || method!=='POST')return null;
+    serveAccounts(route,method,body,key);return new Promise((_,reject)=>{lose=reject;});
+  };
+  const first=submit('actionForm'); await submit('actionForm'); assert.equal(posts(endpoint).length,1);
+  lose(Error('lost after commit'));await first;interceptAccount=null;await click('actionClose');
+  await click('refreshDetail'); assert.equal($('adjustCredits').disabled,true); assert.equal($('retryAction').hidden,false);
+  await click('retryAction');await submit('actionForm');
+  assert.equal(posts(endpoint)[0].key,posts(endpoint)[1].key);
+  assert.deepEqual(posts(endpoint)[1].body,{action:'adjust',delta:-7,reason:'核对奖励'});
+  assert(content('accountMetrics').includes('93'));assert(content('accountAudit').includes('核对奖励'));assert.equal($('adjustCredits').disabled,false);
+  await click('toggleAccount');$('actionReason').value='暂停测试';await submit('actionForm');await submit('actionForm');
+  assert.equal($('toggleAccount').textContent,'恢复账号');assert(content('accountMetrics').includes('已停用'));
+  await click('toggleAccount');$('actionReason').value='恢复测试';await submit('actionForm');await submit('actionForm');
+  assert.equal($('toggleAccount').textContent,'停用账号');
+  let finish;
+  interceptAccount=route=>route.startsWith('accounts/'+fixtureId+'?')?new Promise(resolve=>{finish=resolve;}):null;
+  const oldDetail=click('refreshDetail');await click('logout');finish(ok({account:{id:fixtureId,username:'old-session'}}));await oldDetail;
+  assert.equal($('accountList').children.length,0);assert.equal($('accountLedger').children.length,0);assert.equal($('accountAudit').children.length,0);
+  assert(!content('detailStatus').includes('读取失败'));assert.equal($('accountSearch').value,'');interceptAccount=null;await login();
+}
 async function tests(){
   await tick();
   assert.deepEqual(calls.map(c=>c.route),['session']); assert.equal($('workspace').hidden,true);
   await login();assert.equal($('token').value,'');assert.equal($('workspace').hidden,false);
-  assert.equal($('paidAmount').textContent,'¥25.87');assert.equal($('accounts').textContent,12);
+  assert.equal($('paidAmount').textContent,'¥25.87');assert.equal($('accounts').textContent,21);
+  await accountTests();
+  await click('couponTab');
   assert(content('plan').includes(plan.name));assert(!content('couponList').includes('SHOULD-NOT-RENDER'));
   $('price').value='30';$('providerPlan').value=coupon.afdianPlanId;await submit('couponForm');assert(!$('review').open);
   $('price').value='19.99';$('providerPlan').value=plan.afdianPlanId;await submit('couponForm');assert(!$('review').open);
@@ -147,13 +233,13 @@ async function tests(){
   assert.deepEqual(posts('redemptions').at(-1).body,{credits:10,count:2,days:30,note:'QA'});assert.match(posts('redemptions').at(-1).key,/^[0-9a-f-]{36}$/);
   await click('logout');assert($('workspace').hidden && !$('login').hidden);assert.equal($('codes').value,'');assert.equal($('note').value,'');
   summaryOffline=true;await login();assert.equal($('accounts').textContent,'—');assert(!$('reviewCoupon').disabled);
-  summaryOffline=false;await click('refreshCoupons');assert.equal($('accounts').textContent,12);
+  summaryOffline=false;await click('refreshCoupons');assert.equal($('accounts').textContent,21);
   summaryOffline=true;await click('refreshRedemptions');assert.equal($('accounts').textContent,'—');
   let finish;listReply=()=>new Promise(r=>{finish=r;});const old=click('refreshCoupons');await click('logout');
   finish(ok([coupon]));await old;assert.equal($('couponList').children.length,0,'Late session cannot repopulate logged-out metadata');
-  assert(!/localStorage|sessionStorage|document\.cookie|innerHTML|console\./.test(js));
+  assert(!/localStorage|sessionStorage|document\.cookie|innerHTML|console\./.test(js+accountsJs));
   assert(html.includes('name="robots" content="noindex,nofollow"'));assert(html.includes('src="/admin/admin.js"'));assert(html.includes('href="/admin/admin.css"'));
-  console.log('PASS admin website: session isolation, confirmed coupon/redemption creation and revocation, exact pricing, idempotent retry, one-time secrets and independent summary');
+  console.log('PASS admin website: account search, pagination, signed adjustments, suspension/restoration, stale response isolation, idempotent retry, coupons and redemptions');
 }
 // Optional real-browser check: provide Playwright and CHROMIUM_PATH to an installed browser.
 // A loopback HTTP server inspects the browser's actual Origin and cookie headers.
@@ -161,10 +247,10 @@ async function browserTest() {
   const http = require('node:http');
   const { chromium } = require('playwright');
   const writes = [];
-  let converted=false;
+  let converted=false, browserAccounts;
   const server = http.createServer(async (req,res) => {
     const origin = 'http://127.0.0.1:' + server.address().port;
-    const files = {'/admin/':'index.html','/admin/admin.js':'admin.js','/admin/admin.css':'admin.css'};
+    const files = {'/admin/':'index.html','/admin/admin.js':'admin.js','/admin/accounts.js':'accounts.js','/admin/admin.css':'admin.css'};
     res.setHeader('Referrer-Policy','no-referrer');
     if (files[req.url]) {
       const f=files[req.url];
@@ -186,7 +272,13 @@ async function browserTest() {
     }
     if(!auth){res.writeHead(401).end('{}');return;}
     const previous={...redemption,id:'d'.repeat(32),mode:converted?'oncePerAccount':'singleUse',status:converted?'active':'redeemed',claimCount:1};
-    const paths={plans:[plan],coupons:[coupon],redemptions:[previous],summary:{accounts:2,paidOrders:1,paidAmountFen:1999}};
+    const paths={plans:[plan],coupons:[coupon],redemptions:[previous],summary:{accounts:21,paidOrders:1,paidAmountFen:1999}};
+    if(route.startsWith('accounts')) {
+      const chunks=[];for await(const chunk of req)chunks.push(chunk);
+      const body=chunks.length?JSON.parse(Buffer.concat(chunks)):undefined;
+      const result=browserAccounts(route,req.method,body,req.headers['idempotency-key']);
+      res.writeHead(result.status).end(JSON.stringify(await result.json()));return;
+    }
     if(req.method==='POST'&&route==='coupons'){
       assert.match(req.headers['idempotency-key'],/^[a-f0-9-]{36}$/);
       res.writeHead(201).end(JSON.stringify({...coupon,code:'SYNTHETIC-ONCE'}));return;
@@ -209,12 +301,20 @@ async function browserTest() {
     const origin='http://127.0.0.1:'+server.address().port;
     browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_PATH,args:['--disable-background-networking']});
     for(const width of [320,390,1440]){
-      converted=false;
+      converted=false;browserAccounts=accountServer();
       const page=await browser.newPage({viewport:{width,height:820}});page.setDefaultTimeout(4500);
       page.on('request',request=>assert(request.url().startsWith(origin+'/'),'The admin page only requests local resources'));
       await page.goto(origin+'/admin/');await page.locator('#token').fill(token);
       await Promise.all([page.waitForResponse(r=>r.url()===origin+'/admin/api/session' && r.request().method()==='POST'),page.locator('#signIn').click()]);
       assert.equal(writes.at(-1)?.origin,origin,'The browser must send its real same-origin Origin on login');
+      await page.locator('#accountSearch').fill('练习');await page.locator('#accountSearchForm button[type=submit]').click();
+      await page.getByRole('button',{name:'查看 练习账号 的账号明细'}).click();await page.locator('#adjustCredits').click();
+      await page.locator('#adjustAmount').fill('5');await page.locator('#actionReason').fill('现场演示');await page.locator('#actionSubmit').click();
+      assert((await page.locator('#actionReview').textContent()).includes('+5'));
+      assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth && document.querySelector('#actionDialog').getBoundingClientRect().right<=innerWidth));
+      await page.locator('#actionSubmit').click();await page.locator('#accountAudit').getByText('现场演示').waitFor();
+      assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth));
+      await page.locator('#couponTab').click();
       await page.locator('#plan option').first().waitFor({state:'attached'});
       await page.locator('#price').fill('19.99');await page.locator('#providerPlan').fill(coupon.afdianPlanId);
       await page.locator('#reviewCoupon').click();await page.locator('dialog[open]').waitFor();
@@ -233,7 +333,7 @@ async function browserTest() {
       await page.locator('#logout').click();await page.locator('#notice').filter({hasText:'已退出管理。'}).waitFor();
       await page.close();
     }
-    assert.equal(writes.length,15);
+    assert.equal(writes.length,18);
     console.log('PASS real Chromium login/create/logout same-origin headers and authenticated layouts at 320/390/1440px');
   }finally{await browser?.close();await new Promise(r=>server.close(r));}
 }

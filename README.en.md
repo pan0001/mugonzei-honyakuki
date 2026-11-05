@@ -105,7 +105,7 @@ If the operator provides a redemption code, enter it in the website account cent
 
 To self-host, deploy the server separately and configure Afdian creator/developer access, actual plans, and an AI provider. Live payments are disabled by default. Local mock payments take no money and mock translation calls no real AI. See the [server guide](server/README.md) for deployment, APIs, tests, and refund operations. This implementation uses the official protocol independently; it incorporates no VRCLS or other AGPL project code.
 
-Operators can use the developer panel to view account counts, paid orders and their totals, manage payment coupons, and issue credit redemption codes in batches. Configure an operator token on the updated server and open `/admin/`. [Setup and local demo](server/ADMIN.md)
+In `/admin/`, operators can search by username or account ID to see a user's balance, reserved credits, orders, and credit history. Adjusting credits, suspending an account, or restoring it requires a reason and creates an audit entry. The panel also shows payment totals and manages discount and redemption codes. [Setup and local demo](server/ADMIN.md)
 
 Operators can choose a custom code when issuing one credit voucher. Redeem it in the [website account center](https://mugonzei.top/account.html) to fund the same account on desktop. Desktop v0.2.6 users can claim custom codes on the website.
 
