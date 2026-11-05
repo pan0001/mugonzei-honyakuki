@@ -1,3 +1,5 @@
+using System.Buffers;
+using System.Buffers.Text;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Mail;
@@ -242,7 +244,8 @@ public sealed class CreditServiceClient : IDisposable
         ValidateTranslation(id, mode, text, png, target);
         var session = RequireSession();
         sessions.RememberTask(ServerUrl, session.Token, id);
-        object payload = new { mode, text, imageBase64 = png is null ? null : Convert.ToBase64String(png), targetLanguage = target.Trim() };
+        ReadOnlyMemory<byte>? payload = PrepareTranslationJson(mode, text, png, target.Trim());
+        png = null;
         bool submitted = false;
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(token);
         deadline.CancelAfter(TimeSpan.FromMinutes(10));
@@ -260,6 +263,7 @@ public sealed class CreditServiceClient : IDisposable
                     catch (CreditServiceException missing) when (missing.StatusCode == HttpStatusCode.NotFound) { }
                 }
             }
+            payload = null; // Polling needs only the task ID; release the screenshot body after submission.
             if (result is null) throw Interrupted();
             while (!result.IsTerminal)
             {
@@ -274,6 +278,19 @@ public sealed class CreditServiceClient : IDisposable
             if (token.IsCancellationRequested) throw new OperationCanceledException(token);
             throw new InvalidOperationException("等待积分翻译超时，已尝试取消。可在账户窗口查询最近任务；已完成的费用不会回滚。");
         }
+    }
+
+    private static ReadOnlyMemory<byte> PrepareTranslationJson(string mode, string? text, byte[]? png, string targetLanguage)
+    {
+        // The built-in byte[] converter writes base64 directly to UTF-8. Freeze the complete body once:
+        // a same-ID retry must still send the original snapshot even if the caller reuses its PNG buffer.
+        var body = new { mode, text, imageBase64 = png, targetLanguage };
+        if (png is null) return JsonSerializer.SerializeToUtf8Bytes(body, Json);
+        // The validated envelope has a 100-character target and otherwise fixed, short fields.
+        var buffer = new ArrayBufferWriter<byte>(Base64.GetMaxEncodedToUtf8Length(png.Length) + 1024);
+        using var writer = new Utf8JsonWriter(buffer);
+        JsonSerializer.Serialize(writer, body, Json);
+        return buffer.WrittenMemory;
     }
 
     public Task<CreditTranslationResult> GetTaskAsync(Guid id, CancellationToken token = default)
@@ -314,9 +331,9 @@ public sealed class CreditServiceClient : IDisposable
         }
     }
 
-    private async Task<CreditTranslationResult> ReadTaskAsync(HttpMethod method, Guid id, object? body, CreditSession session, CancellationToken token, bool cancel = false)
+    private async Task<CreditTranslationResult> ReadTaskAsync(HttpMethod method, Guid id, ReadOnlyMemory<byte>? body, CreditSession session, CancellationToken token, bool cancel = false)
     {
-        var result = await SendAsync<CreditTranslationResult>(method, "v1/translations/" + id.ToString("D") + (cancel ? "/cancel" : ""), body, session, token).ConfigureAwait(false);
+        var result = await SendAsync<CreditTranslationResult>(method, "v1/translations/" + id.ToString("D") + (cancel ? "/cancel" : ""), null, session, token, preparedJson: body).ConfigureAwait(false);
         if (result.Id != id || result.Status is not ("queued" or "running" or "succeeded" or "no_text" or "failed" or "cancelled")
             || result.SourceText?.Length > 100_000 || result.Translation?.Length > 100_000)
             throw InvalidResponse();
@@ -351,7 +368,7 @@ public sealed class CreditServiceClient : IDisposable
     }
 
     private async Task<T> SendAsync<T>(HttpMethod method, string path, object? body, CreditSession? session, CancellationToken token,
-        bool allowEmpty = false, HttpStatusCode? expectedStatus = null)
+        bool allowEmpty = false, HttpStatusCode? expectedStatus = null, ReadOnlyMemory<byte>? preparedJson = null)
     {
         token.ThrowIfCancellationRequested();
         using var timeout = CancellationTokenSource.CreateLinkedTokenSource(token);
@@ -360,7 +377,12 @@ public sealed class CreditServiceClient : IDisposable
         using var request = new HttpRequestMessage(method, uri);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
         if (session is not null) request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", session.Token);
-        if (body is not null) request.Content = new StringContent(JsonSerializer.Serialize(body, Json), Encoding.UTF8, "application/json");
+        if (preparedJson is { } utf8)
+        {
+            request.Content = new ReadOnlyMemoryContent(utf8);
+            request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/json") { CharSet = "utf-8" };
+        }
+        else if (body is not null) request.Content = new StringContent(JsonSerializer.Serialize(body, Json), Encoding.UTF8, "application/json");
         try
         {
             using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, timeout.Token).ConfigureAwait(false);

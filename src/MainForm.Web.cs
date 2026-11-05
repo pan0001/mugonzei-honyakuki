@@ -9,9 +9,11 @@ internal sealed partial class MainForm
     private System.Windows.Forms.Timer? webChanges;
     private bool webReady, webDirty, needsWebSnapshot;
     private Image? projectedPreview;
-    private long thumbnailRevision;
+    private string? thumbnailData;
+    private bool encodingThumbnail, thumbnailSent;
+    internal Func<Image, string> EncodeWorkspaceThumbnail = EncodeThumbnail;
     private readonly Func<CancellationToken,Task<GitHubUpdateResult>> readRelease;
-    private readonly Action<Uri> openRelease;
+    private readonly Action<Uri> openBrowser;
     private CancellationTokenSource? updateCheck;
     private GitHubUpdateResult? checkedRelease;
     private string updateState = "idle", updateMessage = "";
@@ -79,7 +81,7 @@ internal sealed partial class MainForm
     {
         // Only use destinations from the native check. The web message never supplies a URL.
         if (closing || checkedRelease is not { UpdateAvailable: true } r) return;
-        try { openRelease(r.InstallerUrl ?? r.ReleaseUrl); }
+        try { openBrowser(r.InstallerUrl ?? r.ReleaseUrl); }
         catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException)
         {
             updateMessage = "无法打开默认浏览器，请检查浏览器设置后重试。";
@@ -138,7 +140,9 @@ internal sealed partial class MainForm
         }
         Put("mode", settings.RuntimeMode); Put("effectiveMode", ActiveDesktopMode ? "Desktop" : "SteamVR");
         Put("vrStatus", vrStatus.Text); Put("status", status.Text); Put("source", sourceText.Text); Put("sourceHint", sourceHint);
-        Put("translation", translatedText.Text); Put("captureLabel", imageBox.Text); Put("busy", busy);
+        Put("translation", translatedText.Text); Put("busy", busy);
+        // If the bitmap changed, deliver the new capture number along with its own pixels.
+        if (!full && thumbnailSent && ReferenceEquals(preview.Image, projectedPreview)) Put("captureLabel", imageBox.Text);
         Put("canCancel", cancelButton.Enabled); Put("canRecognize", !(settings.TranslationBackend == "Credits" && settings.ProcessingMode is "Image" or "Handwriting"));
         Put("recognizeLabel", recognizeButton.Text); Put("inputHelp", workspaceInputHelp.Text); Put("page", pages.Count > 0 ? pageIndex + 1 : 0);
         Put("pages", pages.Count); Put("apiTestResult", apiTestResult.Text); Put("googleTestResult", googleTestResult.Text);
@@ -156,31 +160,56 @@ internal sealed partial class MainForm
             delta["accountUsername"] = username; delta["accountLoggedIn"] = username.Length > 0;
         }
         if (delta.Count > 1) web.Post(delta);
-        if (full || !ReferenceEquals(preview.Image, projectedPreview))
+        if (full) thumbnailSent = false;
+        if (encodingThumbnail) return;
+        if (!ReferenceEquals(preview.Image, projectedPreview))
         {
-            var image = projectedPreview = preview.Image;
-            long revision = ++thumbnailRevision;
-            if (image is null) web.Post(new { type = "state", preview = (string?)null });
-            else _ = PostThumbnail(image, revision);
+            projectedPreview = preview.Image;
+            thumbnailData = null;
+            thumbnailSent = false;
+            if (projectedPreview is not null)
+            {
+                _ = PrepareThumbnailAsync(projectedPreview);
+                return;
+            }
+        }
+        if (!thumbnailSent)
+        {
+            sent["captureLabel"] = imageBox.Text;
+            web.Post(new { type = "state", preview = thumbnailData, captureLabel = imageBox.Text });
+            thumbnailSent = true;
         }
     }
 
-    private async Task PostThumbnail(Image image, long revision)
+    private async Task PrepareThumbnailAsync(Image image)
     {
+        encodingThumbnail = true;
         try
         {
-            double factor = Math.Min(1, Math.Min(720d / image.Width, 480d / image.Height));
-            using var thumb = new Bitmap(image, Math.Max(1, (int)(image.Width * factor)), Math.Max(1, (int)(image.Height * factor)));
+            // Clone gives the worker an independent GDI+ image handle. Capture or shutdown
+            // can replace/dispose the displayed image while that worker scales and compresses.
+            var owned = (Image)image.Clone();
             string encoded = await Task.Run(() =>
             {
-                using var output = new MemoryStream();
-                thumb.Save(output, ImageFormat.Jpeg);
-                return "data:image/jpeg;base64," + Convert.ToBase64String(output.ToArray());
+                using (owned) return EncodeWorkspaceThumbnail(owned);
             });
-            if (!closing && revision == thumbnailRevision) web?.Post(new { type = "state", preview = encoded });
+            if (ReferenceEquals(image, preview.Image)) thumbnailData = encoded;
         }
         catch (Exception e) when (e is ArgumentException or InvalidOperationException or System.Runtime.InteropServices.ExternalException)
-        { if (!closing && revision == thumbnailRevision) web?.Post(new { type = "state", preview = (string?)null }); }
+        { /* Publish an empty thumbnail for this frame if GDI+ cannot render it. */ }
+        finally { encodingThumbnail = false; }
+        // Only start the newest outstanding frame. A reload reuses its cached JPEG, and
+        // a hidden workspace waits until it is restored before starting another encode.
+        if (!closing && !IsDisposed) PushWorkspace();
+    }
+
+    internal static string EncodeThumbnail(Image image)
+    {
+        double factor = Math.Min(1, Math.Min(720d / image.Width, 480d / image.Height));
+        using var thumb = new Bitmap(image, Math.Max(1, (int)(image.Width * factor)), Math.Max(1, (int)(image.Height * factor)));
+        using var output = new MemoryStream();
+        thumb.Save(output, ImageFormat.Jpeg);
+        return "data:image/jpeg;base64," + Convert.ToBase64String(output.GetBuffer(), 0, checked((int)output.Length));
     }
 
     private async Task ReceiveWorkspace(JsonElement message)
@@ -222,6 +251,11 @@ internal sealed partial class MainForm
                             case "recognize": await CaptureAndTranslate(true); break;
                             case "cancel": CancelAllWork(); break;
                             case "saveScreenshot": SaveCurrentScreenshot(); break;
+                            case "openVrcls":
+                                try { openBrowser(new Uri("https://web.voicelinkvr.top/")); }
+                                catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception)
+                                { throw new InvalidOperationException("无法打开默认浏览器，请检查浏览器设置。", error); }
+                                break;
                             case "checkUpdate": await CheckForUpdateAsync(); break;
                             case "downloadUpdate": OpenCheckedUpdate(); break;
                             case "previous": ChangePage(-1); break;

@@ -454,15 +454,19 @@
       if (document.body.dataset.busy !== String(Boolean(state.busy))) document.body.dataset.busy = String(Boolean(state.busy));
       display(byId("resultState"), Boolean(state.busy));
     }
-    disableWithReason(byId("cancelTask"), !Boolean(state.canCancel ?? state.busy), "当前没有可取消的任务");
-    disableWithReason(byId("recognizeButton"), state.canRecognize === false, "积分服务需要同时识别并翻译");
-    const count = Number(state.pages) || 0;
-    const index = count ? Math.max(1, Math.min(count, Number(state.page) || 1)) : 0;
-    text(byId("pageNumber"), index + " / " + count);
-    display(byId("pageTools"), count > 1);
-    for (const id of ["next","previous"]) disableWithReason(byId(id), count < 2 || Boolean(state.busy),
-      state.busy ? "本次翻译完成后可翻页" : "当前只有一页");
-    updateModes();
+    if (Object.hasOwn(small, "canCancel") || Object.hasOwn(small, "busy"))
+      disableWithReason(byId("cancelTask"), !Boolean(state.canCancel ?? state.busy), "当前没有可取消的任务");
+    if (Object.hasOwn(small, "canRecognize"))
+      disableWithReason(byId("recognizeButton"), state.canRecognize === false, "积分服务需要同时识别并翻译");
+    if (["pages","page","busy"].some(key => Object.hasOwn(small, key))) {
+      const count = Number(state.pages) || 0;
+      const index = count ? Math.max(1, Math.min(count, Number(state.page) || 1)) : 0;
+      text(byId("pageNumber"), index + " / " + count);
+      display(byId("pageTools"), count > 1);
+      for (const id of ["next","previous"]) disableWithReason(byId(id), count < 2 || Boolean(state.busy),
+        state.busy ? "本次翻译完成后可翻页" : "当前只有一页");
+    }
+    if (settings || ["mode","effectiveMode","vrStatus","inputHelp"].some(key => Object.hasOwn(small, key))) updateModes();
   }
 
   document.addEventListener("click", event => {

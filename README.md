@@ -8,7 +8,7 @@
 
 在 Windows 桌面或 SteamVR 中截取手写和印刷文字，在屏幕或头显下方阅读翻译字幕。
 
-[Windows x64 安装程序 · v0.2.8-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.8-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.8-preview.exe) · [便携 ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.8-preview/Mugonzei-Honyakuki-win-x64-v0.2.8-preview.zip) · [反馈问题](https://github.com/pan0001/mugonzei-honyakuki/issues)
+[Windows x64 安装程序 · v0.2.9-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.9-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.9-preview.exe) · [便携 ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.9-preview/Mugonzei-Honyakuki-win-x64-v0.2.9-preview.zip) · [反馈问题](https://github.com/pan0001/mugonzei-honyakuki/issues)
 
 **工作台示例**
 
@@ -58,6 +58,8 @@
 ## 升级与增量更新
 
 从 v0.2.5-preview 或更早版本升级时，请先从本页顶部手动下载当前版本。从 v0.2.6-preview 起，点击工作台左侧导航底部的「检查更新」（窄窗口位于顶部导航右侧），客户端才会查询 GitHub，显示当前版本和最新版本。有新版时，点「下载新版」可在默认浏览器下载官方安装程序。如果该版本没有对应安装程序，点「查看发布页」可查看其他下载。
+
+点击「检查更新」上方的「需要语音翻译？试试VRCLS」，可在默认浏览器打开 [VRCLS 官网](https://web.voicelinkvr.top/)。
 
 升级前先退出翻译器。安装版直接运行新版安装程序，即可更新原安装目录。便携版请将新版 ZIP 完整解压到新目录，再运行其中的 `SteamVrTranslator.exe`。两种方式都会沿用 `%LOCALAPPDATA%/SteamVrTranslator/` 中的设置和已保存的密钥。
 

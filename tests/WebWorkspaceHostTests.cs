@@ -33,7 +33,7 @@ internal static class WebWorkspaceHostTests
                 Uri? opened = null;
                 using var form = new MainForm(true, useWebUi: true, webProfileDirectory: profile,
                     checkForUpdates: ct => { requests++; return check.Task.WaitAsync(ct); },
-                    openUpdateLink: uri => opened = uri) {
+                    openBrowserLink: uri => opened = uri) {
                     ReadDesktopWindows = () => { Interlocked.Increment(ref windowRequests); return [new(windowId, "合成目标", "fixture")]; },
                     IsDesktopWindowSelectable = id => selectable && id == windowId,
                     ShowInTaskbar = false, StartPosition = FormStartPosition.Manual,
@@ -46,6 +46,7 @@ internal static class WebWorkspaceHostTests
                 Task<string> Js(string script) => core.ExecuteScriptAsync(script);
                 Task WaitJs(string script) => Until(async () => await Js(script) == "true");
                 await WaitJs("document.querySelector('#activeMode')?.textContent.includes('桌面') === true");
+                await WorkspacePreviewTests.RunAsync(form, core);
                 if (windowRequests != 0) throw new Exception("The workspace enumerated windows before the user selected window capture");
                 await Js("document.querySelector('#desktopCaptureEntry').click(); window.editWindowField=(key,value)=>{const field=document.querySelector('[data-field='+key+']');field.value=value;field.dispatchEvent(new Event('change'));};editWindowField('desktopCaptureSource','Window')");
                 await WaitJs("document.querySelector('[data-field=desktopWindowId]').options.length===2");
@@ -73,6 +74,14 @@ internal static class WebWorkspaceHostTests
                 await Js("document.querySelector('#updateDownload').click()");
                 await Until(() => Task.FromResult(opened == installer));
                 await Js("document.querySelector('#updateClose').click()");
+                opened = null;
+                await Js("document.querySelector('#vrclsEntry').click()");
+                var vrcls = new Uri("https://web.voicelinkvr.top/");
+                await Until(() => Task.FromResult(opened == vrcls));
+                opened = null;
+                await Js("window.chrome.webview.postMessage({type:'action',action:'openVrcls',url:'https://outside.invalid/'})");
+                await Until(() => Task.FromResult(opened == vrcls));
+                if (!surface.IsEntry(core.Source) || requests != 1) throw new Exception("Voice link replaced the workspace or performed an update check");
                 await Js("document.querySelector('input[name=mode][value=Desktop]').click()");
                 await Until(() => Task.FromResult(form.ReadSettingsDraft().RuntimeMode == "Desktop"));
                 await Js("window.sameControl = document.querySelector('input[name=mode][value=Desktop]'); window.sameControl.focus()");

@@ -35,6 +35,9 @@ button svg, .empty svg { width: 18px; height: 18px; fill: none; stroke: currentC
 .rail button:hover:enabled { background: #1b282b; border-color: transparent; }
 .rail button[aria-current="page"] { color: #a5ebce; background: #223831; }
 .rail-update { flex: none; margin-top: auto; border-top: 1px solid var(--line); padding-top: 12px; }
+#vrclsEntry { display: block; min-height: 36px; padding: 5px; font-size: 12px; line-height: 1.35; text-align: left; white-space: normal; }
+#vrclsEntry span { white-space: nowrap; }
+#vrclsEntry strong { color: var(--accent); font-weight: 500; }
 #updateEntry { line-height: 1.4; }
 #updateEntry small { display: block; margin-top: 3px; font-size: 11px; color: var(--muted); overflow-wrap: anywhere; }
 .update-entry-short { display: none; }
@@ -158,12 +161,14 @@ body[data-error=true] .dot { background: #e9a185; }
   body { grid-template-columns: 1fr; grid-template-rows: auto minmax(0,1fr); }
   .rail { flex-direction: row; padding: 6px 10px; gap: 6px; align-items: center; border-right: 0; border-bottom: 1px solid var(--line); }
   .brand { display: none; }
-  .rail nav { display: flex; flex: 1; gap: 2px; }
+  .rail nav { display: flex; flex: 1; flex-wrap: wrap; gap: 2px; }
   .rail button { width: auto; padding: 5px 8px; gap: 4px; font-size: 12px; min-height: 34px; white-space: nowrap; }
   .rail button svg { width: 15px; height: 15px; }
-  .rail-update { margin-top: 0; padding-top: 0; padding-left: 5px; border-top: 0; border-left: 1px solid var(--line); }
+  .rail-update { display: grid; justify-items: start; margin-top: 0; padding-top: 0; padding-left: 5px; border-top: 0; border-left: 1px solid var(--line); }
+  #vrclsEntry { min-height: 30px; padding: 2px 4px; font-size: 11px; }
+  #updateEntry { min-height: 26px; padding-block: 2px; }
   #updateEntry small { display: none; }
-  .update-panel { inset: 51px 10px auto auto; }
+  .update-panel { inset: 80px 10px auto auto; max-height: calc(100vh - 90px); }
   .page-head { min-height: 76px; padding-block: 9px; }
   .page { padding-top: 15px; }
   .workspace-grid { gap: 10px; }
@@ -175,6 +180,7 @@ body[data-error=true] .dot { background: #e9a185; }
   .preview-surface { aspect-ratio: 2 / 1; min-height: 132px; }
 }
 @media (max-width: 560px) {
+  .rail-update { max-width: 100px; }
   .rail button svg { display: none; }
   .rail button { padding: 4px 6px; }
   .update-entry-full { display: none; }

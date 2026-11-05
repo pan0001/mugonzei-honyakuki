@@ -9,7 +9,7 @@ internal sealed partial class MainForm
         if (preview.Image is null) { SetStatus("还没有可以保存的截图。"); return; }
         // Keep the exact image selected when the dialog opens, even if a controller
         // capture replaces the preview while the modal dialog pumps UI messages.
-        using var snapshot = new Bitmap(preview.Image);
+        using var snapshot = (Image)preview.Image.Clone();
         using var dialog = new SaveFileDialog
         {
             Title = "保存当前原始截图",

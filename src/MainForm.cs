@@ -88,11 +88,11 @@ internal sealed partial class MainForm : Form
     private readonly bool demo;
 
     public MainForm(bool demo, bool useWebUi = false, string? webProfileDirectory = null,
-        Func<CancellationToken, Task<GitHubUpdateResult>>? checkForUpdates = null, Action<Uri>? openUpdateLink = null)
+        Func<CancellationToken, Task<GitHubUpdateResult>>? checkForUpdates = null, Action<Uri>? openBrowserLink = null)
     {
         this.demo = demo;
         readRelease = checkForUpdates ?? GitHubUpdateChecker.CheckAsync;
-        openRelease = openUpdateLink ?? (uri => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true })?.Dispose());
+        openBrowser = openBrowserLink ?? (uri => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true })?.Dispose());
         runtimeMonitor = new RuntimeModeMonitor(
             demo ? () => Task.FromResult(0) : () => Task.Run(SteamVrPresence.ReadServerPid),
             () => vr.IsConnected, vr.Connect, vr.Disconnect);
@@ -599,7 +599,7 @@ internal sealed partial class MainForm : Form
                 captureInProgress = false;
             }
             token.ThrowIfCancellationRequested();
-            var old = preview.Image; preview.Image = new Bitmap(cropped); old?.Dispose();
+            var old = preview.Image; preview.Image = (Bitmap)cropped.Clone(); old?.Dispose();
             saveScreenshotButton.Enabled = true;
             captured = true;
             imageBox.Text = $"截图 #{number} · {request.CapturedAt ?? DateTime.Now:HH:mm:ss.fff} · {request.Source} · {cropped.Width} × {cropped.Height}";

@@ -8,7 +8,7 @@
 
 Windows デスクトップと SteamVR の画面から手書き・印刷文字を読み取り、画面や視界の下部に訳文を表示します。
 
-[Windows x64 インストーラー · v0.2.8-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.8-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.8-preview.exe) · [ポータブル版 ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.8-preview/Mugonzei-Honyakuki-win-x64-v0.2.8-preview.zip) · [不具合を報告](https://github.com/pan0001/mugonzei-honyakuki/issues)
+[Windows x64 インストーラー · v0.2.9-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.9-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.9-preview.exe) · [ポータブル版 ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.9-preview/Mugonzei-Honyakuki-win-x64-v0.2.9-preview.zip) · [不具合を報告](https://github.com/pan0001/mugonzei-honyakuki/issues)
 
 **ワークスペースの表示例**
 
@@ -58,6 +58,8 @@ Windows デスクトップと SteamVR の画面から手書き・印刷文字を
 ## アップグレードと差分更新
 
 v0.2.5-preview 以前をお使いの場合は、このページ上部のリンクから 最新版を手動でダウンロードしてください。v0.2.6-preview 以降は、「检查更新」（更新を確認）はワークスペースの左側メニュー下部にあります。ウィンドウ幅が狭いときは上部ナビゲーションの右側に表示されます。ボタンを押したときだけ GitHub に問い合わせ、使用中のバージョンと最新版を表示します。新版があれば「下载新版」（新版をダウンロード）を押すと、既定のブラウザーで公式インストーラーをダウンロードできます。対応するインストーラーがない場合は「查看发布页」（リリースページを開く）からほかの配布ファイルを確認できます。
+
+音声翻訳を使いたいときは、更新確認ボタンのすぐ上にある「需要语音翻译？试试VRCLS」をクリックすると、既定のブラウザーで [VRCLS の公式サイト](https://web.voicelinkvr.top/)が開きます。
 
 更新前に翻訳機を終了してください。インストーラー版は、新しいインストーラーを実行すると元のインストール先で更新されます。ポータブル版は、新しい ZIP を別のフォルダーにすべて展開して `SteamVrTranslator.exe` を起動します。どちらも `%LOCALAPPDATA%/SteamVrTranslator/` に保存した設定とキーを引き継ぎます。
 

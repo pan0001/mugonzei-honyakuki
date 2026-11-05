@@ -8,7 +8,7 @@
 
 Translate handwritten or printed text on a Windows desktop or in SteamVR, with subtitles near the bottom of the monitor or headset view.
 
-[Windows x64 installer · v0.2.8-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.8-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.8-preview.exe) · [Portable ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.8-preview/Mugonzei-Honyakuki-win-x64-v0.2.8-preview.zip) · [Report an issue](https://github.com/pan0001/mugonzei-honyakuki/issues)
+[Windows x64 installer · v0.2.9-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.9-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.9-preview.exe) · [Portable ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.9-preview/Mugonzei-Honyakuki-win-x64-v0.2.9-preview.zip) · [Report an issue](https://github.com/pan0001/mugonzei-honyakuki/issues)
 
 **Example: translating a station sign into Simplified Chinese**
 
@@ -58,6 +58,8 @@ If `VCRUNTIME140.dll` or `MSVCP140.dll` is missing, install Microsoft's [Visual 
 ## Upgrading and incremental updates
 
 If you use v0.2.5-preview or earlier, download the current version manually from the links at the top of this page. Starting with v0.2.6-preview, select 「检查更新」 (Check for updates) at the bottom of the workspace sidebar. In a narrow window, the button is on the right of the top navigation bar. The app queries GitHub only when you click and shows your installed version and the latest release. If an update is available, select 「下载新版」 (Download update) to download the official installer in your default browser. If the release has no matching installer, select 「查看发布页」 (View release) for other downloads.
+
+For voice translation, select 「需要语音翻译？试试VRCLS」 just above Check for updates to open the [VRCLS website](https://web.voicelinkvr.top/) in your default browser.
 
 Exit the app before upgrading. Run the new installer to update the existing installation. For the portable version, extract the entire new ZIP to a new folder and run `SteamVrTranslator.exe` from there. Both versions reuse the settings and saved keys in `%LOCALAPPDATA%/SteamVrTranslator/`.
 

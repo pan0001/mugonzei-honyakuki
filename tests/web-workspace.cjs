@@ -268,6 +268,12 @@ async function main() {
     assert.equal(await run("el('previewImage').hasAttribute('src')"), false);
     for (const width of [1150, 740, 390, 320]) {
       await viewport(width, 700);
+      assert.ok(await run("(()=>{const v=el('vrclsEntry'),u=el('updateEntry'),r=v.getBoundingClientRect();return v.textContent.trim()==='需要语音翻译？试试VRCLS' && v.nextElementSibling===u && r.width>0 && r.height>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=u.getBoundingClientRect().top+1;})()"),
+        "The voice translation link is visible directly above updates at " + width + "px");
+      if (width === 1150) assert.ok(await run("(()=>{const v=el('vrclsEntry'),r=document.createRange();r.selectNodeContents(v);return !v.querySelector('svg') && r.getBoundingClientRect().height <= parseFloat(getComputedStyle(v).lineHeight)+2;})()"),
+        "The voice link fits on one line in the normal sidebar without an icon");
+      await run("el('vrclsEntry').click()");
+      assert.deepEqual(await run("sent.at(-1)"), {type:"action",action:"openVrcls"}, "The browser receives neither a URL nor a settings draft from the page");
       await run("el('updateEntry').click()");
       assert.ok(await run("['updateEntry','updatePanel','updateCheck'].every(id=>{const r=el(id).getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;})"),
         "The update entry and panel fit at " + width + "px");

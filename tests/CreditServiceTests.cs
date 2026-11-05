@@ -20,6 +20,8 @@ public static class CreditServiceTests
         await RedemptionContract();
         await CouponContract();
         await RecoverWithoutResubmission();
+        await ScreenshotUploadRetryContract();
+        await CancelDuringScreenshotUpload();
         await MissingAfterDisconnectReusesId();
         await CancellationUsesIndependentToken();
         await FailedConnectionCanBeRecoveredLater();
@@ -339,6 +341,95 @@ public static class CreditServiceTests
         });
         Equal("no_text", (await client.ExecuteAsync(id, "text", "sample", null, "English", default)).Status, "no-text result");
         Equal("PUT,GET,PUT", string.Join(',', sequence), "GET before same-ID resubmit");
+    }
+
+    private static async Task ScreenshotUploadRetryContract()
+    {
+        // A valid one-pixel PNG containing both '+' and '/' in its base64 representation.
+        byte[] original = Convert.FromBase64String("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aN1kAAAAASUVORK5CYII=");
+        byte[] screenshot = original.ToArray();
+        const string target = "简体中文🌐 \"<&\\";
+        var firstSent = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var disconnect = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var temp = Authenticated();
+        Guid id = Guid.NewGuid();
+        var methods = new List<string>();
+        byte[]? firstBody = null;
+        using var client = Client(temp, async (req, token) =>
+        {
+            methods.Add(req.Method.Method);
+            Equal(id.ToString("D"), req.RequestUri!.Segments.Last(), "image recovery keeps the original ID");
+            if (req.Method == HttpMethod.Get)
+            {
+                Assert(req.Content is null, "recovery GET never sends the screenshot");
+                return Response(new { }, HttpStatusCode.NotFound);
+            }
+            Equal("application/json", req.Content!.Headers.ContentType?.MediaType, "upload MIME type");
+            Equal("utf-8", req.Content.Headers.ContentType?.CharSet, "upload charset");
+            byte[] body = await req.Content.ReadAsByteArrayAsync(token);
+            Equal((long?)body.Length, req.Content.Headers.ContentLength, "known upload length");
+            using var json = JsonDocument.Parse(body);
+            var root = json.RootElement;
+            Equal(4, root.EnumerateObject().Count(), "wire object has exactly the existing four fields");
+            Equal("image", root.GetProperty("mode").GetString(), "image mode");
+            Equal(JsonValueKind.Null, root.GetProperty("text").ValueKind, "explicit null text for screenshot");
+            Equal(target, root.GetProperty("targetLanguage").GetString(), "trimmed Unicode/escaped target survives the wire");
+            Assert(root.GetProperty("imageBase64").GetBytesFromBase64().AsSpan().SequenceEqual(original), "each PUT carries the captured PNG byte for byte");
+            if (firstBody is not null)
+            {
+                Assert(firstBody.AsSpan().SequenceEqual(body), "retry reuses the exact UTF-8 JSON body");
+                return Response(TaskResult(id, "succeeded"));
+            }
+            firstBody = body;
+            firstSent.SetResult();
+            await disconnect.Task.WaitAsync(token);
+            throw new HttpRequestException("synthetic lost acknowledgement");
+        });
+        Task<CreditTranslationResult> pending = client.ExecuteAsync(id, "image", null, screenshot, " " + target + " ", default);
+        await Task.WhenAny(firstSent.Task, pending);
+        if (pending.IsCompleted) await pending;
+        screenshot.AsSpan().Fill(0xFF);
+        disconnect.SetResult();
+        Equal("succeeded", (await pending).Status, "image recovery completes after a missing request");
+        Equal("PUT,GET,PUT", string.Join(',', methods), "retry only after querying the original image task");
+
+        // At the PNG limit, legacy JSON validators still have room for the envelope even with many '+' characters.
+        byte[] maximum = new byte[CreditServiceClient.MaxImageBytes];
+        maximum.AsSpan().Fill(0xFB);
+        using var limitClient = Client(temp, (req, _) =>
+        {
+            long encodedLength = 4L * ((maximum.Length + 2) / 3);
+            Assert(req.Content!.Headers.ContentLength is long count && count > encodedLength && count <= encodedLength + 65_536,
+                "a maximum-size PNG fits the existing server JSON body limit");
+            return Task.FromResult(Response(TaskResult(id, "no_text")));
+        });
+        await limitClient.ExecuteAsync(id, "handwriting", null, maximum, new string('界', 100), default);
+    }
+
+    private static async Task CancelDuringScreenshotUpload()
+    {
+        using var temp = Authenticated();
+        using var cancellation = new CancellationTokenSource();
+        Guid id = Guid.NewGuid();
+        var methods = new List<string>();
+        using var client = Client(temp, async (req, token) =>
+        {
+            methods.Add(req.Method.Method);
+            if (req.Method == HttpMethod.Put)
+            {
+                using var upload = await req.Content!.ReadAsStreamAsync(token);
+                byte[] buffer = new byte[16];
+                await upload.ReadExactlyAsync(buffer, token);
+                cancellation.Cancel();
+                await upload.ReadExactlyAsync(buffer, token);
+                throw new Exception("cancelled screenshot upload continued");
+            }
+            Assert(req.RequestUri!.AbsolutePath.EndsWith(id.ToString("D") + "/cancel") && req.Content is null && !token.IsCancellationRequested,
+                "cancel request targets the original image task with a separate deadline and no screenshot");
+            return Response(TaskResult(id, "cancelled"));
+        });
+        await ExpectAsync<OperationCanceledException>(() => client.ExecuteAsync(id, "image", null, [1, 2, 3], "English", cancellation.Token));
+        Equal("PUT,POST", string.Join(',', methods), "user cancellation does not re-upload the screenshot");
     }
 
     private static async Task CancellationUsesIndependentToken()
