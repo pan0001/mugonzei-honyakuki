@@ -27,7 +27,7 @@ dotnet publish server/Mugonzei.Server.csproj -c Release -r linux-x64 --self-cont
 
 脚本从 `server/Mugonzei.Server.csproj` 读取版本，默认读取 `dist/Mugonzei-Server-linux-x64-v<版本>/`，输出同名 `.zip` 和 `.zip.sha256`。可用 `-PublishDirectory` 指定仓库内的其他 publish 目录。打包前检查 Linux x64 / .NET 10 配置、服务依赖、本文档、配置示例与第三方许可；包内 `manifest.sha256` 记录每个文件的 SHA-256，并回读 ZIP 验证。数据库、数据目录、环境文件、密钥、调试符号和 SQLite 静态库不会打包。真实配置与持久化数据应保存在发行目录之外。
 
-可选 Linux 容器：`docker build -t mugonzei-server ./server`，运行时将容器端口 5187 仅映射到主机 loopback，并持久挂载 `/data`；镜像以 `app` 非 root 用户运行，挂载目录须可写。Dockerfile 未替运营者启用收款、配置密钥或建立公网 HTTPS。
+可选 Linux 容器：`docker build -f server/Dockerfile -t mugonzei-server .`，运行时将容器端口 5187 仅映射到主机 loopback，并持久挂载 `/data`；镜像以 `app` 非 root 用户运行，挂载目录须可写。Dockerfile 未替运营者启用收款、配置密钥或建立公网 HTTPS。
 
 默认仅监听 `http://127.0.0.1:5187`，数据库为工作目录下 `data/mugonzei.db`。生产使用 `ASPNETCORE_URLS` 和 `MUGONZEI_DATABASE` 指定监听及持久化目录，在可信反向代理后提供 HTTPS。默认不读取 `X-Forwarded-For/Proto`。若代理与服务同机，设置 `MUGONZEI_TRUSTED_PROXIES=127.0.0.1,::1`，仅这些明确 IP 的一跳转发头被接受；不要把所有互联网来源设为可信代理。未配置时同一代理后的用户共享 IP 限流额度。
 

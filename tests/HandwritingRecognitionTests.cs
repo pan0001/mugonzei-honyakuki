@@ -39,7 +39,7 @@ public static class HandwritingRecognitionTests
             && !reading.RootElement.TryGetProperty("target_language", out _),
             "The final reader receives no provisional source text or translation target");
         string rules = HandwritingFocusPrompt.ReadingInstructions;
-        Check(rules.Contains(HandwritingPrompt.NoText, StringComparison.Ordinal)
+        Check(rules.Contains(VisionPrompt.NoText, StringComparison.Ordinal)
             && rules.Contains("[无法辨认]", StringComparison.Ordinal)
             && rules.Contains("Do not translate", StringComparison.Ordinal),
             "Focused reading retains source-only, no-text and uncertainty rules");
@@ -47,6 +47,12 @@ public static class HandwritingRecognitionTests
             && rules.Contains("EVERY Japanese line", StringComparison.Ordinal)
             && rules.Contains("genuinely repeated", StringComparison.Ordinal),
             "Focused reading checks fine line endings while preserving real repeated source lines");
+        foreach (string visualStage in new[] { VisionPrompt.Instructions, HandwritingPrompt.Instructions,
+            HandwritingFocusPrompt.LocationInstructions, rules })
+            Check(visualStage.Contains(VisionPrompt.ContentSelection, StringComparison.Ordinal),
+                "Every image stage distinguishes in-game chat and primary document text from surrounding controls");
+        Check(!CodexTranslationClient.Instructions.Contains(VisionPrompt.ContentSelection, StringComparison.Ordinal),
+            "The plain text translator receives no screenshot selection or suppression instructions");
     }
 
     private static async Task TwoStagePixelsAsync()
@@ -82,9 +88,9 @@ public static class HandwritingRecognitionTests
                 Check(description.Contains("3000", StringComparison.Ordinal)
                     && description.Contains("2000", StringComparison.Ordinal),
                     "Detail coordinates refer to the original pixels, not the reduced overview");
-                return Task.FromResult("\0  " + source + "  \u0007");
+                return Task.FromResult(source);
             }, CancellationToken.None);
-        Check(actual == source, "Normalize source output without guessing, translating, or dropping legitimate repeated lines");
+        Check(actual == source, "Pass the provider's source through without dropping legitimate repeated lines");
         Check(calls.Count == 2, "No automatic retry or extra model pass is introduced");
         Check(original.AsSpan().SequenceEqual(originalCopy), "The caller's PNG remains unchanged");
     }
@@ -198,8 +204,8 @@ public static class HandwritingRecognitionTests
     {
         string actual = await HandwritingRecognition.RecognizeAsync(png, new AppSettings(),
             (_, _, _) => Task.FromResult("{\"regions\":[]}"),
-            (_, _, _, _) => Task.FromResult(HandwritingPrompt.NoText), CancellationToken.None);
-        Check(actual.Length == 0, "The final reader's explicit no-text marker becomes an empty source for the caller to handle");
+            (_, _, _, _) => Task.FromResult(""), CancellationToken.None);
+        Check(actual.Length == 0, "The reader's empty source reaches the caller without a fallback translation");
     }
 
     private static byte[] Fixture(int width, int height)

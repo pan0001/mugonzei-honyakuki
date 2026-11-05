@@ -15,7 +15,7 @@ public sealed class CodexTranslationClient
         + "Preserve names, numbers, meaning and useful line breaks. ";
     private const string OutputInstructions = "Return only the translated text, with no introduction, markdown fences, commentary or explanation. "
         + "If the text is already in the requested language, return it unchanged.";
-    internal const string Instructions = SourceInstructions + "Correct only obvious OCR mistakes. " + OutputInstructions;
+    internal const string Instructions = SourceInstructions + TranslationClient.FidelityRules + OutputInstructions;
     internal const string HandwritingTranslationInstructions = SourceInstructions + HandwritingPrompt.TranslationRules + OutputInstructions;
 
     private readonly Func<ProcessStartInfo, string?, CancellationToken, Task<CodexProcessResult>> run;
@@ -69,12 +69,8 @@ public sealed class CodexTranslationClient
     public Task<string> AnalyzeImageAsync(byte[] png, AppSettings settings, CancellationToken token)
         => RunImageAsync(png, settings, false, token);
 
-    public async Task<string> RecognizeHandwritingAsync(byte[] png, AppSettings settings, CancellationToken token)
-    {
-        string result = await RunImageAsync(png, settings, true, token).ConfigureAwait(false);
-        token.ThrowIfCancellationRequested();
-        return HandwritingPrompt.NormalizeResult(result);
-    }
+    public Task<string> RecognizeHandwritingAsync(byte[] png, AppSettings settings, CancellationToken token)
+        => RunImageAsync(png, settings, true, token);
 
     public Task<string> LocateHandwritingAsync(byte[] png, AppSettings settings, CancellationToken token)
         => RunImagesAsync([png], settings, HandwritingFocusPrompt.LocationInstructions,
@@ -88,7 +84,7 @@ public sealed class CodexTranslationClient
         string result = await RunImagesAsync(images, settings, HandwritingFocusPrompt.ReadingInstructions,
             HandwritingFocusPrompt.BuildReadingRequest(viewDescription), "high", token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
-        return HandwritingPrompt.NormalizeResult(result);
+        return VisionPrompt.NormalizeResult(result);
     }
 
     private async Task<string> RunImageAsync(byte[] png, AppSettings settings, bool handwriting, CancellationToken token)
@@ -103,7 +99,9 @@ public sealed class CodexTranslationClient
 
         string prompt = handwriting ? HandwritingPrompt.Request : VisionPrompt.BuildRequest(settings);
         string instructions = handwriting ? HandwritingPrompt.Instructions : VisionPrompt.Instructions;
-        return await RunImagesAsync([png], settings, instructions, prompt, "low", token).ConfigureAwait(false);
+        string result = await RunImagesAsync([png], settings, instructions, prompt, "low", token).ConfigureAwait(false);
+        token.ThrowIfCancellationRequested();
+        return VisionPrompt.NormalizeResult(result);
     }
 
     private async Task<string> RunImagesAsync(IReadOnlyList<byte[]> images, AppSettings settings,

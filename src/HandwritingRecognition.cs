@@ -28,7 +28,8 @@ internal static class HandwritingRecognition
         token.ThrowIfCancellationRequested();
         string result = await read(views.Images, views.Description, settings, token).ConfigureAwait(false);
         token.ThrowIfCancellationRequested();
-        return HandwritingPrompt.NormalizeResult(result);
+        // Both providers normalize the final reading before returning it.
+        return result;
     }
 
     private static T WithImage<T>(byte[] png, Func<Bitmap, T> action)

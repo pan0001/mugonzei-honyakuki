@@ -73,7 +73,8 @@ internal sealed partial class MainForm
         var result = await client.ExecuteAsync(Guid.NewGuid(), mode, text, png, settings.TargetLanguage, token);
         token.ThrowIfCancellationRequested();
         creditBalanceNote.Text = $"账户积分余额：{result.Balance} · 可在「账号与积分」查看可用与预留积分。";
-        sourceText.Text = result.SourceText ?? text ?? "";
+        var original = result.SourceText ?? text;
+        sourceText.Text = Mugonzei.Shared.GameTextFilter.Clean(original);
         if (result.Status == "no_text")
         {
             SetStatus("没有识别到可读文字，本次不扣积分。请靠近文字或缩小截图范围。");
@@ -84,8 +85,15 @@ internal sealed partial class MainForm
         if (result.Status != "succeeded" || string.IsNullOrWhiteSpace(result.Translation))
             throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error)
                 ? "积分服务尚未返回有效结果，请到「账号与积分」恢复最近任务。" : result.Error);
-        translatedText.Text = result.Translation;
-        await PublishResultPagesAsync(result.Translation, request.GestureId, token, settings.ShowSource ? sourceText.Text : null);
+        var translation = Mugonzei.Shared.GameTextFilter.Clean(result.Translation);
+        if (translation.Length == 0 || (!string.IsNullOrWhiteSpace(original) && sourceText.Text.Length == 0))
+        {
+            // Older services may already have charged for a response containing only interface text.
+            SetStatus($"没有可显示的正文 · 积分服务已完成此任务 · 当前余额 {result.Balance} 分");
+            ShowStatus("没有可显示的正文"); return;
+        }
+        translatedText.Text = translation;
+        await PublishResultPagesAsync(translation, request.GestureId, token, settings.ShowSource ? sourceText.Text : null);
         SetStatus($"翻译完成 · 扣除 1 积分 · 余额 {result.Balance} 分 · {started.Elapsed.TotalSeconds:F1} 秒 · {pages.Count} 页");
     }
 }

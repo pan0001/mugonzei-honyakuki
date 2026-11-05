@@ -619,6 +619,10 @@ internal sealed partial class MainForm : Form
                 byte[] png = await Task.Run(() => VisionImage.Prepare(cropped), token);
                 var result = await translator.AnalyzeImageAsync(png, settings, token);
                 token.ThrowIfCancellationRequested();
+                if (string.IsNullOrWhiteSpace(result))
+                {
+                    SetStatus("画面中没有可翻译的正文。"); ShowStatus("没有可翻译的文字"); return;
+                }
                 translatedText.Text = result;
                 await PublishResultPagesAsync(result, request.GestureId, token, title: "识图结果");
                 SetStatus($"识图完成 · {started.Elapsed.TotalSeconds:F1} 秒 · {pages.Count} 页 · 快捷键 {settings.Hotkey}");
@@ -648,6 +652,7 @@ internal sealed partial class MainForm : Form
                 text = await Task.Run(() => ocr.Recognize(cropped, settings.OcrLanguages), token);
             }
             token.ThrowIfCancellationRequested();
+            if (!aiTranscription) text = Mugonzei.Shared.GameTextFilter.Clean(text);
             sourceText.Text = text;
             if (string.IsNullOrWhiteSpace(text))
             {
@@ -681,6 +686,11 @@ internal sealed partial class MainForm : Form
             }); ShowStatus("正在翻译…");
             var translation = await translator.TranslateAsync(text, settings, token);
             token.ThrowIfCancellationRequested();
+            translation = Mugonzei.Shared.GameTextFilter.Clean(translation);
+            if (translation.Length == 0)
+            {
+                SetStatus("译文中没有可显示的正文，已保留识别原文。"); ShowStatus("没有可显示的译文"); return;
+            }
             translatedText.Text = translation;
             await PublishResultPagesAsync(translation, request.GestureId, token, settings.ShowSource ? text : null);
             SetStatus($"翻译完成 · {started.Elapsed.TotalSeconds:F1} 秒 · {pages.Count} 页 · 快捷键 {settings.Hotkey}");

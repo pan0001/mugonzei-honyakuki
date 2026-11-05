@@ -21,6 +21,7 @@ public static class CodexVisionTests
     {
         byte[] png = Fixture();
         await AttachmentAndPromptAsync(png);
+        await ImageAndTextScopeAsync(png);
         await HandwritingAttachmentAndPromptAsync(png);
         await HandwritingRoundTripPreservesSourceAsync(png);
         await HandwritingTranslationAsync();
@@ -37,6 +38,30 @@ public static class CodexVisionTests
         await FocusFailureCleanupAsync(png);
         await FocusValidationAsync(png);
         Console.WriteLine("PASS: Codex image attachment, vision instructions, validation and cleanup");
+    }
+
+    private static async Task ImageAndTextScopeAsync(byte[] png)
+    {
+        const string telemetry = "FPS N/A | GPU 44% | CPU 13%";
+        const string message = "Player: My FPS is fine. Keep OSC on.";
+        int calls = 0;
+        var client = new CodexTranslationClient((_, payload, _) =>
+        {
+            calls++;
+            if (calls == 3)
+            {
+                using var request = JsonDocument.Parse(payload!);
+                return Task.FromResult(Completed(request.RootElement.GetProperty("source_text").GetString()!));
+            }
+            return Task.FromResult(Completed(telemetry + "\n" + (calls == 1 ? VisionPrompt.NoText : message)));
+        });
+        var config = Config();
+        Equal("", await client.AnalyzeImageAsync(png, config, default), "HUD plus the no-content marker is empty");
+        Equal(message, await client.RecognizeHandwritingViewsAsync([png], "Image 1: full image.", config, default),
+            "A detail reader keeps the actual player chat");
+        Equal(telemetry, await client.TranslateAsync(telemetry, config, default),
+            "A technical string submitted directly for text translation stays intact");
+        Equal(3, calls, "Filtering requires no extra model passes");
     }
 
     private static byte[] Fixture()
@@ -460,7 +485,7 @@ public static class CodexVisionTests
         {
             calls++;
             Equal(5, ImageArguments(start).Length, "The maximum five views are individually attached");
-            return Task.FromResult(Completed(HandwritingPrompt.NoText));
+            return Task.FromResult(Completed(VisionPrompt.NoText));
         });
         Equal("", await client.RecognizeHandwritingViewsAsync([png, png, png, png, png], "Five views.", Config(), default), "No-text marker is normalized for multi-view reading");
         Equal(1, calls, "Five-view request accepted once");

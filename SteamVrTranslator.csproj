@@ -17,6 +17,7 @@
     <ApplicationIcon>assets/mugonzei.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="shared/GameTextFilter.cs" />
     <Compile Include="src/**/*.cs" />
     <Compile Include="vendor/openvr_api.cs" Nullable="disable" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />

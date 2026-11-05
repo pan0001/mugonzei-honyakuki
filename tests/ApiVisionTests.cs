@@ -10,6 +10,7 @@ public static class ApiVisionTests
     public static async Task RunAsync()
     {
         await ImagePayloadAsync();
+        await ImageAndTextScopeAsync();
         await FocusPayloadAsync();
         await FocusBoundsAndCancellationAsync();
         HandwritingNormalization();
@@ -29,6 +30,36 @@ public static class ApiVisionTests
         await StreamingInterruptedAndCancelledAsync();
         await StreamingInterruptedAndCancelledAsync(handwriting: true);
         Console.WriteLine("PASS: API vision PNG integrity, optional detail, bounded SSE, input/output bounds, failures, retry and cancellation");
+    }
+
+    private static async Task ImageAndTextScopeAsync()
+    {
+        const string telemetry = "FPS N/A | GPU 44% | CPU 13%";
+        const string dialogue = "好、好、好。你的 FPS 有多少？";
+        const string manual = "The OSC manual lists this example:\n" + telemetry;
+        byte[] png = Png();
+        int calls = 0;
+        using var http = new HttpClient(new Handler(async (request, token) =>
+        {
+            using var json = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
+            var messages = json.RootElement.GetProperty("messages");
+            if (++calls == 3)
+            {
+                Check(messages[1].GetProperty("content").GetString() == manual
+                    && messages[0].GetProperty("content").GetString()!.Contains(TranslationClient.FidelityRules),
+                    "Text translation keeps the exact quoted technical example");
+                return Response(Success(manual));
+            }
+            return Response(Success(calls == 1 ? telemetry + "\n" + dialogue : VisionPrompt.NoText));
+        }));
+        using var client = new TranslationClient(http);
+        var config = Config();
+        Check(await client.AnalyzeImageAsync(png, config, default) == dialogue,
+            "A leaked telemetry bar is discarded while intentional repetitions and spoken FPS survive");
+        Check(await client.AnalyzeImageAsync(png, config, default) == "",
+            "An image of overlay controls alone produces an empty translation");
+        Check(await client.TranslateAsync(manual, config, default) == manual && calls == 3,
+            "A plain translation result keeps the technical example");
     }
 
     private static AppSettings Config() => new()
@@ -361,13 +392,15 @@ public static class ApiVisionTests
 
     private static void HandwritingNormalization()
     {
-        Check(HandwritingPrompt.NormalizeResult("\0 \r\n中文，\tおはよ！\r\nHello?\a \n") == "中文，\tおはよ！\r\nHello?",
+        Check(VisionPrompt.NormalizeResult("\0 \r\n中文，\tおはよ！\r\nHello?\a \n") == "中文，\tおはよ！\r\nHello?",
             "Only control characters and outer whitespace are removed; internal punctuation, tabs and line breaks remain");
-        Check(HandwritingPrompt.NormalizeResult("\0 \n[[NO_TEXT]]\t") == "", "Exact no-text marker becomes an empty result");
-        Check(HandwritingPrompt.NormalizeResult("prefix [[NO_TEXT]] suffix") == "prefix [[NO_TEXT]] suffix",
+        Check(VisionPrompt.NormalizeResult("\0 \n[[NO_TEXT]]\t") == "", "Exact no-text marker becomes an empty result");
+        Check(VisionPrompt.NormalizeResult("[无法辨认]、\n[无法辨认]。") == "",
+            "Unreadable markers with no recognizable words need no translation");
+        Check(VisionPrompt.NormalizeResult("prefix [[NO_TEXT]] suffix") == "prefix [[NO_TEXT]] suffix",
             "A marker inside original text is not removed");
         const string explanation = "识别结果如下：\n```\nおはよ [无法辨认]\n```";
-        Check(HandwritingPrompt.NormalizeResult(explanation) == explanation,
+        Check(VisionPrompt.NormalizeResult(explanation) == explanation,
             "Normalization never guesses which text is commentary or silently strips original content");
     }
 
@@ -568,7 +601,7 @@ public static class ApiVisionTests
             calls++;
             using var payload = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(token));
             Check(payload.RootElement.GetProperty("messages")[1].GetProperty("content").GetArrayLength() == 6, "Maximum five-view payload reaches the API as five images");
-            return Response(Success(HandwritingPrompt.NoText));
+            return Response(Success(VisionPrompt.NoText));
         }));
         using var client = new TranslationClient(http);
         Check(await client.RecognizeHandwritingViewsAsync([png, png, png, png, png], "Five views.", Config(), default) == "", "Multi-view no-text marker is normalized");

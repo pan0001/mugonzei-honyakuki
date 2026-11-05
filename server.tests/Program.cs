@@ -371,6 +371,7 @@ internal static partial class Program
         Throws(400, () => TranslationInput.Validate(new("text", "source", Pixel, "zh")));
         try { JsonSerializer.Deserialize<TranslationRequest>("{\"mode\":\"text\",\"text\":\"x\",\"targetLanguage\":\"zh\",\"model\":\"attacker\"}", TranslationInput.Json); throw new Exception("Unexpected client model accepted"); }
         catch (JsonException) { checks++; }
+        await HostedScreenTextTests();
     }
 
     private static async Task HttpContract()

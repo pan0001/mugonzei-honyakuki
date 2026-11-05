@@ -18,6 +18,13 @@ if (args.Length == 2 && args[0] == "--fake-local-ocr")
 
 try
 {
+    if (args.Contains("--vision-content-regression"))
+    {
+        await HandwritingRecognitionTests.RunAsync();
+        await ApiVisionTests.RunAsync();
+        await CodexVisionTests.RunAsync();
+        return;
+    }
     if (args.Contains("--window-capture-smoke"))
     {
         await WindowCaptureTests.RunAsync();
@@ -129,6 +136,7 @@ try
     VisionImageTests.Run();
     HandwritingDetailImagesTests.Run();
     OcrAccuracyTests.Run();
+    GameTextFilterTests.Run();
     await HandwritingRecognitionTests.RunAsync();
     await ApiVisionTests.RunAsync();
     await HandwritingLocalApiTests.RunAsync();
