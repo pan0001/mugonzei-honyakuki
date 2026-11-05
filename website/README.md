@@ -1,12 +1,18 @@
-# 官网与账户页面
+# 官网、账户与服务状态
 
-公开网站：<https://mugonzei.top>。账户页：<https://mugonzei.top/account.html>。
+[官网首页](https://mugonzei.top) · [账户中心](https://mugonzei.top/account.html) · [服务状态](https://mugonzei.top/status.html)
 
 纯 HTML / CSS / JavaScript，无第三方前端依赖和构建步骤。首页包含产品介绍、示意交互、Windows 下载、使用说明与常见问题；账户页使用后台的注册、登录、积分兑换码、订单和流水接口。公开服务已提供托管积分翻译和爱发电充值（5 元购买 200 积分，10 元购买 500 积分）。用户登录要充值的账户，创建订单，再从订单链接前往爱发电，选择 1 个月并核对金额。付款后返回账户核验该订单。首笔真实付款的到账流程仍待验证。
 
 登录后输入运营者发放的兑换码即可将积分计入同一账户。该入口独立于爱发电充值；积分到账不会自动开放 AI。网络失败保留当前输入，用户主动重试不会重复入账；成功或退出时清空，不将码写入浏览器存储或 URL。管理员生成/失效操作见[后台兑换码说明](../server/README.md#积分兑换码)。
 
 在账户页选择「创建账户」，填写用户名、密码和邮箱，点击「发送验证码」，再输入邮件里的 6 位数字完成注册。验证码在 10 分钟内有效，同一邮箱等待 60 秒可重发。新账号验证后与原有账号一样，均可用用户名和密码登录。邮件由后台配置的发信服务发送。浏览器只在提交注册的 HTTPS 请求体中传送密码和验证码，成功或离开注册页时清空验证码。
+
+## 服务状态与下载
+
+状态页匿名读取同源 `GET /v1/status`。如果后台提供详细报告，可查看运行时间、账户数据库读检查、翻译与充值配置、队列。旧后台返回 404 时，只读取公开的 `GET /v1/plans` 验证套餐接口是否可达；未报告的项目显示「未提供」，不能据此判断付款或 AI 上游是否可用。页面不运行试译或支付，不访问个人数据。页面可见且在线时可选每 30 秒刷新，探测失败显示「当前状态未知」。
+
+官网主按钮从本站 `/downloads/<tag>/` 下载 Windows x64 安装 EXE；本站与 GitHub Release 提供相同字节与 SHA-256。安装后从开始菜单启动，设置和密钥沿用原用户的数据目录。无法访问本站镜像时可使用 GitHub 备用下载；便携 ZIP 需要完整解压，GitHub 的 `Source code` 供自行构建。[v0.2.5-preview 发布页](https://github.com/pan0001/mugonzei-honyakuki/releases/tag/v0.2.5-preview)
 
 ## 本地检查
 
@@ -15,11 +21,13 @@
 ```powershell
 node --check website/main.js
 node --check website/account.js
+node --check website/status.js
 node tests/website-account.cjs
+node tests/website-status.cjs
 python -m http.server 5288 --bind 127.0.0.1 --directory website
 ```
 
-静态预览：<http://127.0.0.1:5288/>。Python 静态服务器不代理 API，账户页会显示后台暂不可达；真实账户联调使用下方 Caddy 同源配置。账户脚本测试使用内存模拟网络，覆盖验证码发送与重发、切换邮箱或登录页、注册错误与旧账户登录，以及付款地址白名单、幂等重试、到账后移除付款入口、旧请求覆盖与会话失效等情形。
+静态预览：<http://127.0.0.1:5288/>。Python 静态服务器不代理 API，账户和状态页需要下方 Caddy 同源配置才能取得真实数据。账户脚本测试使用内存模拟网络，覆盖验证码发送与重发、切换邮箱或登录页、注册错误与旧账户登录，以及付款地址白名单、幂等重试、到账后移除付款入口、旧请求覆盖与会话失效等情形。
 
 产品行为发布前还须执行仓库完整桌面测试：`dotnet run --project tests/SteamVrTranslator.Tests.csproj`。
 
@@ -27,14 +35,10 @@ python -m http.server 5288 --bind 127.0.0.1 --directory website
 
 继续使用 [后台部署说明](../server/deploy/README.md) 的独立用户、回环监听和 Caddy。域名 `mugonzei.top` 与 `api.mugonzei.top` 均须有指向服务器的 A 记录，TCP 80/443 可达。Caddy 自动申请并续期证书。
 
-1. 将下列公开文件打包上传到新的版本目录，例如 `/opt/mugonzei/website/releases/<commit>/`：
-   `index.html`、`account.html`、`styles.css`、`main.js`、`account.js`、`favicon.svg`、`workspace.png`、`robots.txt`。
-2. 版本目录及文件使用 `root:root`，目录 `0755`、文件 `0644`，Caddy 只需读取。**不要上传整个仓库、配置、数据库、测试、截图或本 README。** `workspace.png` 是仓库中已公开的固定示例界面。
-3. 记录上传包 SHA-256 并在服务器校验。将 `/opt/mugonzei/website/current` 符号链接原子切换到新版本，保留旧版本用于回滚。上传目录应使用明确的新版本名，不覆盖现有版本。
-4. 备份 `/etc/caddy/Caddyfile`，参考 [Caddyfile.example](Caddyfile.example) 合并官网段，保留原 API 配置及其他已有站点。若使用自定义域名，替换示例中的两个域名以及账户帮助中的服务地址。
-5. 执行 `caddy validate --config /etc/caddy/Caddyfile --adapter caddyfile`，通过后 `systemctl reload caddy`，不会重启数据库后台。
-6. 用正常证书校验访问首页、账户页和 `/v1/plans`，确认 HTTP 跳转 HTTPS、原 API 的 `/health` 仍正常、未登录 `/v1/account` 返回 401。检查桌面与窄屏布局、登录/退出和余额读取。
+1. 上传、验证并公开 GitHub Release 的 Windows EXE、便携 ZIP 和校验文件。根据网站提交的 Git blob 字节计算每个页面与静态资源的 SHA-256，并从已验证的发布包取得安装器 SHA-256。
+2. 用 [发布脚本](../tools/deploy-website.py) 的 `PAGES` 清单准备 JSON：`commit`（网站提交）、`previous`（现网提交）、`tag`、`installerSha256`、`pages`（文件名 → 哈希）。在已有主机运行经哈希验证的脚本：`python3 deploy-website.py manifest.json`。它只下载清单内的公开页面与指定安装器，校验通过才原子切换 `website/current`。不同内容不得覆盖同版本下载。旧页面与下载保留，便于回滚。
+3. 用正常证书校验首页、账户页、状态页、同源套餐 API、API 域名健康端点及未登录账户请求。验证官网 EXE、校验文件和 GitHub 资产摘要相同。单独更新静态官网无需改 Caddy 配置或重启账户服务；首次设置域名可参考 [Caddyfile.example](Caddyfile.example)。
 
-账户请求通过网站同源 `/v1/*` 转发到 `127.0.0.1:5187`，后台只信任已配置的 Caddy 回环代理。静态文件配置与 API 的 CSP 分开；账户 API 返回 401/404 时不会退回首页 HTML。网页登录令牌只保留当前页面内存，刷新或关闭后需再次登录；退出会请求服务端撤销，会话最长 14 天。请求使用 Bearer 认证，不依赖 Cookie，不写浏览器持久存储。不在访问日志中记录请求体或 Authorization。
+账户和状态请求通过网站同源 `/v1/*` 转发到 `127.0.0.1:5187`，后台只信任已配置的 Caddy 回环代理。静态文件配置与 API 的 CSP 分开；账户 API 返回 401/404 时不会退回首页 HTML。网页登录令牌只保留当前页面内存，刷新或关闭后需再次登录；退出会请求服务端撤销，会话最长 14 天。请求使用 Bearer 认证，不依赖 Cookie，不写浏览器持久存储。不在访问日志中记录请求体或 Authorization。 模型和支付服务密钥只在后台使用，网页中的登录令牌用于访问本人账户。
 
-官网独立于桌面发布版本：只改网页不重打 Windows 安装包。下载链接指向已验证的 `v0.2.3-preview` 公开资源；发布后续桌面版本时同步更新版本号、下载链接与文件大小。Git 按增量提交保留历史，不覆盖已有 Release。
+官网可独立更新。发布新桌面版本时，在新 Release 上传并核验安装程序和便携 ZIP，再更新官网主按钮、便携版链接和三语 README，保留已有版本下载。

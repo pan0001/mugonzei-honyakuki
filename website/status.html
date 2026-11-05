@@ -1,0 +1,70 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="查看无言势翻译器的后台服务、账户存储与托管翻译排队情况。">
+  <meta name="theme-color" content="#f7f6f2">
+  <title>服务器状态 · 无言势翻译器</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+  <script src="/status.js" defer></script>
+</head>
+<body class="account-page">
+  <a class="skip-link" href="#main">跳到主要内容</a>
+  <header class="site-header"><div class="container header-inner">
+    <a class="brand" href="/" aria-label="无言势翻译器首页"><img class="site-logo" src="/favicon.svg" alt="" width="38" height="38"><span class="brand-name">无言势翻译器<span lang="en">Mugonzei Honyakuki</span></span></a>
+    <nav class="site-nav" aria-label="主导航"><a href="/#start">使用方法</a><a class="nav-status" aria-current="page" href="/status.html">服务状态</a><a class="nav-account" href="/account.html">账户与积分 <span aria-hidden="true">↗</span></a></nav>
+  </div></header>
+  <main id="main" class="container status-shell">
+    <div class="status-header">
+      <div><h1>服务状态</h1><p>查看账户服务、托管翻译和当前排队情况。</p></div>
+      <div class="refresh-controls">
+        <button id="refresh-status" class="button button-ghost" type="button" disabled><span aria-hidden="true">↻</span><span id="refresh-label">刷新状态</span></button>
+        <label hidden id="auto-refresh-label"><input type="checkbox" id="auto-refresh" checked> 每 30 秒自动刷新</label>
+      </div>
+    </div>
+    <noscript><p class="service-notice">请启用 JavaScript 以查看服务器的实时状态。</p></noscript>
+    <section class="status-overview" aria-labelledby="overview-title">
+      <div>
+        <p class="overview-label"><span class="state-light" id="overall-light" aria-hidden="true"></span>服务总览</p>
+        <h2 id="overview-title" aria-live="polite" aria-atomic="true">等待检测</h2>
+        <p id="overview-detail">读取后台状态后显示检测结果。</p>
+      </div>
+      <dl class="status-times">
+        <dt>最近检测（本地时间）</dt><dd><time id="checked-at">—</time></dd>
+        <dt>服务进程运行时长</dt><dd id="uptime">—</dd>
+      </dl>
+    </section>
+    <div class="status-columns">
+      <section class="panel service-health" aria-labelledby="services-title">
+        <h2 id="services-title">服务明细</h2>
+        <dl class="component-list">
+          <div><dt>后台连接<small>浏览器对公开接口的访问结果</small></dt><dd class="state-badge" id="api-state">未知</dd></div>
+          <div><dt>账户存储<small>后台对账户数据库的读取检测</small></dt><dd class="state-badge" id="storage-state">未知</dd></div>
+          <div><dt>托管翻译<small>AI 接入配置，实际翻译以提交结果为准</small></dt><dd class="state-badge" id="translation-state">未知</dd></div>
+          <div><dt>积分充值<small>服务器的充值开关，到账情况请查看订单</small></dt><dd class="state-badge" id="payments-state">未知</dd></div>
+        </dl>
+      </section>
+      <section class="panel queue-health" aria-labelledby="queue-title">
+        <h2 id="queue-title">翻译队列</h2>
+        <p>服务器上所有用户的托管翻译任务</p>
+        <p id="queue-note" hidden></p>
+        <div id="queue-stats">
+          <div class="queue-stat">
+            <div><h3>执行中</h3><p><strong id="running">—</strong> 个任务</p></div>
+            <meter id="running-meter" aria-hidden="true" value="0" hidden></meter>
+            <p>并发上限 <span id="concurrency">—</span></p>
+          </div>
+          <div class="queue-stat">
+            <div><h3>排队中</h3><p><strong id="waiting">—</strong> 个任务</p></div>
+            <meter id="waiting-meter" aria-hidden="true" value="0" hidden></meter>
+            <p>等候位上限 <span id="capacity">—</span></p>
+          </div>
+        </div>
+      </section>
+    </div>
+  </main>
+  <footer class="site-footer container"><a class="brand" href="/">无言势翻译器</a><a href="/">返回官网 ↗</a></footer>
+</body>
+</html>

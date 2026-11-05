@@ -1,29 +1,52 @@
-'use strict';
-// A local, illustrative animation only: no screenshot, microphone or model request.
-const trigger = document.querySelector('#demo-trigger');
-const ring = document.querySelector('#ring-progress');
-const subtitle = document.querySelector('#demo-subtitle');
-const label = document.querySelector('#demo-label');
-const description = document.querySelector('#demo-description');
-let frame = 0;
-trigger.addEventListener('click', () => {
-  if (trigger.disabled) return;
-  trigger.disabled = true;
-  subtitle.classList.add('is-hidden');
-  label.textContent = '正在长按 X…';
-  description.textContent = '示意动画，不会实际截屏或发送请求';
-  const start = performance.now();
-  function tick(now) {
-    const progress = Math.min(1, (now - start) / 1500);
-    ring.style.strokeDashoffset = String(100 - progress * 100);
-    if (progress < 1) frame = requestAnimationFrame(tick);
-    else {
-      subtitle.classList.remove('is-hidden');
-      label.textContent = '译文，轻轻落在视野下方';
-      description.textContent = '演示已完成 · 点击 X 再看一次';
-      trigger.disabled = false;
-    }
+(() => {
+  'use strict';
+  const scene = document.getElementById('sim');
+  const choices = scene.querySelector('.mode-choices');
+  const play = document.getElementById('replay');
+  const state = document.getElementById('demo-state');
+  const trigger = document.getElementById('trigger-key');
+  const viewLabel = document.getElementById('view-label');
+  const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+  let timer;
+
+  function reset() {
+    window.clearTimeout(timer);
+    scene.classList.remove('is-playing');
+    play.disabled = false;
+    play.querySelector('span').textContent = '播放演示';
+    state.textContent = '固定示例，无需连接设备。';
   }
-  frame = requestAnimationFrame(tick);
-});
-window.addEventListener('pagehide', () => cancelAnimationFrame(frame));
+
+  choices.addEventListener('click', event => {
+    const button = event.target.closest('button[data-choice]');
+    if (!button || !choices.contains(button)) return;
+    reset();
+    const vr = button.dataset.choice === 'vr';
+    scene.dataset.mode = vr ? 'vr' : 'desktop';
+    for (const item of choices.querySelectorAll('button')) {
+      item.setAttribute('aria-pressed', String(item === button));
+    }
+    trigger.textContent = vr ? '左手 X · 长按 1.5 秒' : 'Ctrl + Alt + T · 截取主屏';
+    viewLabel.textContent = vr ? '头显视野' : '桌面窗口';
+  });
+
+  play.addEventListener('click', () => {
+    if (play.disabled) return;
+    const vr = scene.dataset.mode === 'vr';
+    function finish() {
+      scene.classList.remove('is-playing');
+      play.disabled = false;
+      play.querySelector('span').textContent = '重新播放';
+      state.textContent = '字幕已显示：湖边休息处。';
+    }
+    if (reduceMotion.matches) { finish(); return; }
+    scene.classList.add('is-playing');
+    play.disabled = true;
+    play.querySelector('span').textContent = '播放中';
+    state.textContent = vr ? '正在演示长按触发…' : '正在演示快捷键截图…';
+    timer = window.setTimeout(finish, vr ? 1500 : 450);
+  });
+  window.addEventListener('pagehide', reset);
+  choices.hidden = false;
+  play.hidden = false;
+})();
