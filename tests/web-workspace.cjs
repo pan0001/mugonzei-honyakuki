@@ -266,6 +266,32 @@ async function main() {
     assert.equal(await run("el('pageTools').hidden"), false);
     await run("send({type:'state',preview:'https://untrusted.invalid/image.jpg'})");
     assert.equal(await run("el('previewImage').hasAttribute('src')"), false);
+    const saves = await run(`(async () => {
+      const button = el('saveScreenshot'), image = el('previewImage');
+      const first = document.createElement('canvas'), second = document.createElement('canvas');
+      second.width = first.width + 1;
+      const a = first.toDataURL(), b = second.toDataURL();
+      const update = values => send({type:'state', ...values});
+      const checks = [];
+      const click = () => { checks.push(button.disabled); button.click(); };
+      update({preview:a, previewRevision:21, canSavePreview:true});
+      click(); // The first decode cannot have completed in this event loop turn.
+      await image.decode(); click();
+      update({canSavePreview:false}); click();
+      update({preview:b, previewRevision:22, canSavePreview:true});
+      click();
+      await image.decode(); click();
+      update({preview:b, previewRevision:23, canSavePreview:true});
+      await image.decode(); click(); // Identical pixels from a different capture.
+      update({preview:b, canSavePreview:true}); click(); // Old host message with no revision.
+      update({preview:null, previewRevision:24, canSavePreview:true}); click();
+      return {checks, commands:sent.filter(m=>m.action==='saveScreenshot')};
+    })()`);
+    assert.deepEqual(saves.checks, [true,false,true,true,false,false,true,true],
+      "Saving requires decoded pixels, a valid displayed revision and a ready native capture");
+    assert.deepEqual(saves.commands, [21,22,23].map(previewRevision =>
+      ({type:"action", action:"saveScreenshot", previewRevision})),
+      "Each save command names the displayed capture, including successive identical screenshots");
     for (const width of [1150, 740, 390, 320]) {
       await viewport(width, 700);
       assert.ok(await run("(()=>{const v=el('vrclsEntry'),u=el('updateEntry'),r=v.getBoundingClientRect();return v.textContent.trim()==='需要语音翻译？试试VRCLS' && v.nextElementSibling===u && r.width>0 && r.height>0 && r.left>=0 && r.right<=innerWidth && r.top>=0 && r.bottom<=u.getBoundingClientRect().top+1;})()"),
@@ -307,7 +333,7 @@ async function main() {
       }
       await run("showPage('workspace');send({type:'state',preview:null,source:'',translation:'',captureLabel:'',page:0,pages:0,canCancel:false,mode:'Auto',effectiveMode:'Desktop',status:'就绪',settings:{hotkey:'Ctrl+Alt+T'}})");
       await take("workspace-empty");
-      await run("send({type:'state',preview:(" + exampleScreenshot.toString() + ")(),source:'次の電車は 10 時に到着します。',translation:'下一班列车将于 10 点到达。',captureLabel:'截图 #1 · 09:55:12 · 主显示器 · 960 × 600',status:'翻译完成',page:1,pages:1}); el('previewImage').decode()");
+      await run("send({type:'state',preview:(" + exampleScreenshot.toString() + ")(),previewRevision:25,canSavePreview:true,source:'次の電車は 10 時に到着します。',translation:'下一班列车将于 10 点到达。',captureLabel:'截图 #1 · 09:55:12 · 主显示器 · 960 × 600',status:'翻译完成',page:1,pages:1}); el('previewImage').decode()");
       assert.deepEqual(await run("[el('previewImage').naturalWidth,el('previewEmpty').hidden,el('saveScreenshot').disabled,el('source').textContent,el('translation').textContent]"),
         [960,true,false,"次の電車は 10 時に到着します。","下一班列车将于 10 点到达。"]);
       await take("workspace");

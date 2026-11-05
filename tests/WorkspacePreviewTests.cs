@@ -20,6 +20,8 @@ internal static class WorkspacePreviewTests
         int calls = 0, ui = Environment.CurrentManagedThreadId;
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var release = new ManualResetEventSlim();
+        var replacing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var finishReplacement = new ManualResetEventSlim();
         void Update(bool full = false) => push.Invoke(form, [full]);
         void Replace(Bitmap? source, string caption)
         {
@@ -38,17 +40,23 @@ internal static class WorkspacePreviewTests
         form.EncodeWorkspaceThumbnail = image =>
         {
             if (Environment.CurrentManagedThreadId == ui) throw new Exception("Thumbnail resized on the UI thread");
-            if (Interlocked.Increment(ref calls) == 1)
+            int call = Interlocked.Increment(ref calls);
+            if (call == 1)
             {
                 entered.TrySetResult();
                 if (!release.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException("The preview worker could not be released");
                 if (image.Width != 3840) throw new Exception("The worker lost its owned image when the displayed preview was replaced");
             }
+            if (call == 3)
+            {
+                replacing.TrySetResult();
+                if (!finishReplacement.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException("Replacement preview did not resume");
+            }
             return MainForm.EncodeThumbnail(image);
         };
         try
         {
-            await core.ExecuteScriptAsync("window.previewEvents=[];window.chrome.webview.addEventListener('message',e=>{if(e.data.preview)window.previewEvents.push(e.data.captureLabel);})");
+            await core.ExecuteScriptAsync("window.previewEvents=[];window.chrome.webview.addEventListener('message',e=>{if(e.data.preview){window.previewEvents.push(e.data.captureLabel);window.frameRevision=e.data.previewRevision;}})");
             Replace(new Bitmap(3840, 2160), "fixture frame #1");
             await entered.Task.WaitAsync(TimeSpan.FromSeconds(3));
             Replace(new Bitmap(64, 64), "fixture frame #2");
@@ -67,10 +75,26 @@ internal static class WorkspacePreviewTests
             await WaitFor("window.previewEvents.length === 2 && window.previewEvents.every(s=>s==='fixture frame #3')");
             if (calls != 2) throw new Exception("Only the first and latest bitmap should be encoded, including after a full WebView snapshot");
             Console.WriteLine("PASS WebView preview: 3 synthetic captures, 2 background encodes, 1 latest-frame delivery, 0 encodes for 20 status updates and reload");
+            await WaitFor("!document.querySelector('#saveScreenshot').disabled");
+            long previous = long.Parse(await core.ExecuteScriptAsync("window.frameRevision"));
+            if (!form.IsWorkspacePreviewCurrent(previous)) throw new Exception("The visible frame should be eligible to save");
+            Replace(new Bitmap(60, 120), "fixture frame #4");
+            await replacing.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            await WaitFor("document.querySelector('#saveScreenshot').disabled && window.previewEvents.at(-1) === 'fixture frame #3'");
+            if (form.IsWorkspacePreviewCurrent(previous)) throw new Exception("The previous frame must not save the new original during encoding");
+            finishReplacement.Set();
+            await WaitFor("!document.querySelector('#saveScreenshot').disabled && window.previewEvents.at(-1) === 'fixture frame #4'");
+            long newest = long.Parse(await core.ExecuteScriptAsync("window.frameRevision"));
+            if (newest <= previous || form.IsWorkspacePreviewCurrent(previous) || form.IsWorkspacePreviewCurrent(0) || !form.IsWorkspacePreviewCurrent(newest))
+                throw new Exception("Only the new frame's revision may save the current original");
+            await core.ExecuteScriptAsync("window.chrome.webview.postMessage({type:'action',action:'saveScreenshot',previewRevision:" + previous + "})");
+            await WaitFor("document.body.innerText.includes('预览已更新，请查看当前截图后再保存')");
+            Console.WriteLine("PASS WebView save: old revisions rejected both during encoding and after the next preview arrives");
         }
         finally
         {
             release.Set();
+            finishReplacement.Set();
             form.EncodeWorkspaceThumbnail = originalEncoder;
             var last = preview.Image;
             preview.Image = originalImage;

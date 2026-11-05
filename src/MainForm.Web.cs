@@ -10,6 +10,7 @@ internal sealed partial class MainForm
     private bool webReady, webDirty, needsWebSnapshot;
     private Image? projectedPreview;
     private string? thumbnailData;
+    private long thumbnailRevision;
     private bool encodingThumbnail, thumbnailSent;
     internal Func<Image, string> EncodeWorkspaceThumbnail = EncodeThumbnail;
     private readonly Func<CancellationToken,Task<GitHubUpdateResult>> readRelease;
@@ -141,6 +142,7 @@ internal sealed partial class MainForm
         Put("mode", settings.RuntimeMode); Put("effectiveMode", ActiveDesktopMode ? "Desktop" : "SteamVR");
         Put("vrStatus", vrStatus.Text); Put("status", status.Text); Put("source", sourceText.Text); Put("sourceHint", sourceHint);
         Put("translation", translatedText.Text); Put("busy", busy);
+        Put("canSavePreview", IsWorkspacePreviewCurrent(thumbnailRevision));
         // If the bitmap changed, deliver the new capture number along with its own pixels.
         if (!full && thumbnailSent && ReferenceEquals(preview.Image, projectedPreview)) Put("captureLabel", imageBox.Text);
         Put("canCancel", cancelButton.Enabled); Put("canRecognize", !(settings.TranslationBackend == "Credits" && settings.ProcessingMode is "Image" or "Handwriting"));
@@ -165,6 +167,7 @@ internal sealed partial class MainForm
         if (!ReferenceEquals(preview.Image, projectedPreview))
         {
             projectedPreview = preview.Image;
+            thumbnailRevision++;
             thumbnailData = null;
             thumbnailSent = false;
             if (projectedPreview is not null)
@@ -176,10 +179,15 @@ internal sealed partial class MainForm
         if (!thumbnailSent)
         {
             sent["captureLabel"] = imageBox.Text;
-            web.Post(new { type = "state", preview = thumbnailData, captureLabel = imageBox.Text });
+            sent["canSavePreview"] = thumbnailData is not null;
+            web.Post(new { type = "state", preview = thumbnailData, previewRevision = thumbnailRevision,
+                canSavePreview = thumbnailData is not null, captureLabel = imageBox.Text });
             thumbnailSent = true;
         }
     }
+
+    internal bool IsWorkspacePreviewCurrent(long revision) => revision > 0 && revision == thumbnailRevision &&
+        thumbnailSent && thumbnailData is not null && ReferenceEquals(projectedPreview, preview.Image);
 
     private async Task PrepareThumbnailAsync(Image image)
     {
@@ -250,7 +258,12 @@ internal sealed partial class MainForm
                             case "translate": await CaptureAndTranslate(false); break;
                             case "recognize": await CaptureAndTranslate(true); break;
                             case "cancel": CancelAllWork(); break;
-                            case "saveScreenshot": SaveCurrentScreenshot(); break;
+                            case "saveScreenshot":
+                                long revision = message.TryGetProperty("previewRevision", out var value) && value.ValueKind == JsonValueKind.Number
+                                    && value.TryGetInt64(out long number) ? number : 0;
+                                if (IsWorkspacePreviewCurrent(revision)) SaveCurrentScreenshot();
+                                else SetStatus("预览已更新，请查看当前截图后再保存。");
+                                break;
                             case "openVrcls":
                                 try { openBrowser(new Uri("https://web.voicelinkvr.top/")); }
                                 catch (Exception error) when (error is InvalidOperationException or System.ComponentModel.Win32Exception)

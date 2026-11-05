@@ -20,6 +20,8 @@
   let presetSignature = "";
   let presets = [];
   let lastPreview;
+  let previewLoad = 0;
+  let displayedPreviewRevision = 0;
   let lastKeyOrigin = "";
   let pendingSave;
   let windowListState = "idle";
@@ -47,6 +49,10 @@
     disabled(element, value);
     const title = value ? reason : "";
     if (element.title !== title) element.title = title;
+  }
+  function updateSaveScreenshot() {
+    disableWithReason(byId("saveScreenshot"), !displayedPreviewRevision || state.canSavePreview !== true,
+      "请等待当前截图预览显示后再保存");
   }
   function optionalText(id, value) {
     const element = byId(id);
@@ -417,16 +423,30 @@
     if (Object.hasOwn(small, "hasApiKey")) saved.hasApiKey = small.hasApiKey === true;
     if (settings) applySettings(settings);
     if (incomingPresets) updatePresets(incomingPresets);
-    if (preview !== undefined && lastPreview !== preview) {
+    if (preview !== undefined) {
+      const sameImage = lastPreview === preview;
+      const alreadyVisible = sameImage && displayedPreviewRevision > 0;
       lastPreview = preview;
+      const generation = ++previewLoad;
+      const revision = Number.isSafeInteger(small.previewRevision) && small.previewRevision > 0 ? small.previewRevision : 0;
       const valid = typeof preview === "string" && /^data:image\/(?:png|jpeg|webp);base64,/.test(preview);
       const image = byId("previewImage");
-      if (valid) image.src = preview;
-      else image.removeAttribute("src");
+      if (!sameImage) {
+        if (valid) image.src = preview;
+        else image.removeAttribute("src");
+      }
       display(image, valid);
       display(byId("previewEmpty"), !valid);
-      disableWithReason(byId("saveScreenshot"), !valid, "截取一张画面后即可保留");
+      displayedPreviewRevision = valid && alreadyVisible ? revision : 0;
+      if (valid && revision && !alreadyVisible) {
+        image.decode().then(() => {
+          if (generation !== previewLoad) return;
+          displayedPreviewRevision = revision;
+          updateSaveScreenshot();
+        }).catch(() => {}); // A replaced or invalid image never enables saving.
+      }
     }
+    if (preview !== undefined || Object.hasOwn(small, "canSavePreview")) updateSaveScreenshot();
     if (Object.hasOwn(small, "status")) showStatus(small.status || "就绪");
     if (Object.hasOwn(small, "source") || Object.hasOwn(small, "sourceHint")) {
       text(byId("source"), state.source || state.sourceHint || "这里显示从截图中读到的文字。");
@@ -489,6 +509,10 @@
       return;
     }
     const message = {type: "action", action};
+    if (action === "saveScreenshot") {
+      if (!displayedPreviewRevision || state.canSavePreview !== true) return;
+      message.previewRevision = displayedPreviewRevision;
+    }
     if (hasDraft && ["checkCodex", "testApi", "testGoogle", "account", "login", "setup"].includes(action)) message.settings = Object.fromEntries(edits);
     post(message);
   });
