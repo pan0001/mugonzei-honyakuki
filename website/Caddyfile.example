@@ -1,0 +1,24 @@
+# Keep this API hostname for the desktop client.
+api.mugonzei.top {
+	reverse_proxy 127.0.0.1:5187
+}
+
+# Website and account requests share an origin. No permissive CORS is needed.
+mugonzei.top {
+	encode zstd gzip
+	handle /v1/* {
+		reverse_proxy 127.0.0.1:5187
+	}
+	handle {
+		root * /opt/mugonzei/website/current
+		header {
+			Content-Security-Policy "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; connect-src 'self'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+			X-Content-Type-Options nosniff
+			Referrer-Policy no-referrer
+			Permissions-Policy "camera=(), microphone=(), geolocation=()"
+			Strict-Transport-Security "max-age=15552000"
+			Cache-Control no-store
+		}
+		file_server
+	}
+}
