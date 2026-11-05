@@ -39,7 +39,7 @@ public static class UiLayoutTests
                     var codexPath = Field<TextBox>(form, "codexPath");
                     var recognize = Field<Button>(form, "recognizeButton");
                     var showSource = Field<CheckBox>(form, "showSource");
-                    Check(mode.Items.Count == 4 && mode.GetItemText(mode.Items[2]) == "手写体 OCR（AI）→ 翻译"
+                    Check(mode.Items.Count == 4 && mode.GetItemText(mode.Items[2]) == "手写截图直译（AI）"
                         && mode.GetItemText(mode.Items[3]) == "本地日语手写 OCR → 翻译",
                         "AI handwriting and offline Japanese OCR are independent processing options");
                     Check(mode.SelectedIndex == 0 && recognize.Text == "仅截屏识别",
