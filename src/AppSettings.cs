@@ -21,6 +21,14 @@ public sealed class AppSettings
     public string TargetLanguage { get; set; } = "简体中文";
     public string OcrLanguages { get; set; } = "eng+jpn";
     public bool DesktopMode { get; set; }
+    // Older settings stored only the user's fixed desktop choice. An explicit new
+    // preference takes precedence regardless of the order of fields in the file.
+    private string? runtimeMode;
+    public string RuntimeMode
+    {
+        get => runtimeMode ?? (DesktopMode ? "Desktop" : "Auto");
+        set => runtimeMode = value ?? throw new JsonException("Invalid runtime mode.");
+    }
     public string CaptureMode { get; set; } = "VR 左眼";
     public float CropX { get; set; } = 0;
     public float CropY { get; set; } = 0;
@@ -133,6 +141,7 @@ public static class SettingsStore
             || settings.CodexReasoningEffort is not ("" or "low" or "medium" or "high")
             || !Text(settings.ApiBaseUrl, 2048) || !Text(settings.ApiModel, 256, true)
             || !Text(settings.TargetLanguage, 100) || !Text(settings.OcrLanguages, 128)
+            || settings.RuntimeMode is not ("Auto" or "Desktop" or "SteamVR")
             || !Text(settings.CaptureMode, 64) || !Text(settings.Hotkey, 100)
             || !Number(settings.CropX, 0, 0.99f) || !Number(settings.CropY, 0, 0.99f)
             || !Number(settings.CropWidth, 0.01f, 1) || !Number(settings.CropHeight, 0.01f, 1)

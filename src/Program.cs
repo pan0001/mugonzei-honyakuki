@@ -84,13 +84,13 @@ internal static class Program
             bool configure = args.Contains("--setup");
             if (firstRun || signIn || configure)
             {
-                using var setup = new SetupWizardForm(existing ?? new AppSettings(), settings => SettingsStore.Save(settings),
+                using var setup = new WebSetupForm(existing ?? new AppSettings(), settings => SettingsStore.Save(settings),
                     firstRun: firstRun, startAtLogin: signIn && !configure)
                     { StartPosition = FormStartPosition.CenterScreen, ShowInTaskbar = true };
                 if (setup.ShowDialog() != DialogResult.OK) return;
             }
         }
-        Application.Run(new MainForm(demo));
+        Application.Run(new MainForm(demo, useWebUi: true));
     }
 
     internal static bool NeedsAccountSignIn(AppSettings settings, Func<string, CreditSession?> load)

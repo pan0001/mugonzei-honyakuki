@@ -121,8 +121,15 @@ public sealed class VrService : IDisposable
         Disconnect();
         try
         {
+            if (SteamVrPresence.ReadServerPid() == 0)
+            {
+                Status = "SteamVR 未就绪，当前可使用桌面翻译。";
+                return false;
+            }
             var error = EVRInitError.None;
-            _system = OpenVR.Init(ref error, EVRApplicationType.VRApplication_Overlay);
+            // Valve's background app type also prevents a launch if vrserver exits
+            // after the process probe. It can use the overlay and input interfaces.
+            _system = OpenVR.Init(ref error, EVRApplicationType.VRApplication_Background);
             if (error != EVRInitError.None || _system is null)
                 throw new InvalidOperationException($"SteamVR 初始化失败：{error}。请先启动 SteamVR 并连接头显。");
             _initialized = true;

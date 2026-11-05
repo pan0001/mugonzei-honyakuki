@@ -13,6 +13,28 @@ if (args.Length == 2 && args[0] == "--fake-local-ocr")
 
 try
 {
+    if (args.Contains("--web-workspace-smoke"))
+    {
+        await WebWorkspaceHostTests.RunAsync();
+        return;
+    }
+    if (args.Contains("--web-setup-smoke"))
+    {
+        await WebSetupFlowTests.Run();
+        await WebSetupBrowserTests.RunAsync();
+        return;
+    }
+    if (args.Contains("--passive-vr-regression"))
+    {
+        await DesktopModeTests.RunAsync();
+        SpatialCaptureUiTests.Run();
+        return;
+    }
+    if (args.Contains("--web-account-smoke"))
+    {
+        await WebCreditAccountTests.RunAsync();
+        return;
+    }
     if (args.Contains("--desktop-capture-smoke"))
     {
         await DesktopModeTests.RunAsync();
@@ -37,6 +59,7 @@ try
     }
     if (args.Contains("--setup-regression"))
     {
+        await WebSetupFlowTests.Run();
         SetupWizardTests.Run();
         return;
     }
@@ -61,6 +84,7 @@ try
         Console.WriteLine("PASS focused hold animation, native presentation state, cancellation and input continuity regression");
         return;
     }
+    await WebSetupFlowTests.Run();
     SetupWizardTests.Run();
     await CreditServiceTests.RunAsync();
     CreditIntegrationTests.Run();

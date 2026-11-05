@@ -82,14 +82,25 @@ public static class SpatialCaptureUiTests
         var enabled = Get<CheckBox>(form, "spatialSelection");
         var distance = Get<NumericUpDown>(form, "selectionDistance");
         var help = Get<Label>(form, "workspaceInputHelp");
-        Check(!enabled.Checked && !distance.Enabled && help.Text.Contains("1.5"), "Old configurations retain long-press behavior");
-        enabled.Checked = true;
-        Check(distance.Enabled && Get<Label>(form, "selectionHelp").Text.Contains("双手柄"), "Draft selection mode explains its controller gesture");
-        Check(help.Text.Contains("1.5"), "An unsaved interaction draft cannot claim to change the active VR gesture");
-        Get<AppSettings>(form, "settings").SpatialSelectionEnabled = true;
-        Invoke(form, "LoadSettings");
-        Check(help.Text.Contains("松开") && Get<VrService>(form, "vr").SelectionMode,
-            "Loaded saved mode changes the active VR mode and workspace instructions together");
+        var vr = Get<VrService>(form, "vr");
+        Check(!enabled.Checked && !distance.Enabled && Get<Label>(form, "selectionHelp").Text.Contains("1.5")
+            && help.Text.Contains(Get<AppSettings>(form, "settings").Hotkey), "Offline automatic mode shows the desktop shortcut while preserving the default long-press VR gesture");
+        // Simulate a connected runtime for these UI-only checks without calling OpenVR.
+        var connection = typeof(VrService).GetProperty(nameof(VrService.IsConnected))!;
+        connection.SetValue(vr, true);
+        try
+        {
+            Invoke(form, "LoadSettings");
+            Check(!vr.SelectionMode && help.Text.Contains("1.5"), "The connected workspace explains the saved long-press gesture");
+            enabled.Checked = true;
+            Check(distance.Enabled && Get<Label>(form, "selectionHelp").Text.Contains("双手柄"), "Draft selection mode explains its controller gesture");
+            Check(help.Text.Contains("1.5"), "An unsaved interaction draft cannot claim to change the active VR gesture");
+            Get<AppSettings>(form, "settings").SpatialSelectionEnabled = true;
+            Invoke(form, "LoadSettings");
+            Check(help.Text.Contains("松开") && vr.SelectionMode,
+                "Loaded saved mode changes the active VR mode and workspace instructions together");
+        }
+        finally { connection.SetValue(vr, false); }
         Check(distance.Minimum == .4m && distance.Maximum == 4m, "Selection distance is constrained to supported geometry");
     }
 

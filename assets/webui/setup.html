@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self'; base-uri 'none'; form-action 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'">
+  <title>无言势翻译器 · 配置</title>
+  <link rel="stylesheet" href="setup.css">
+  <script defer src="setup.js"></script>
+</head>
+<body>
+  <div id="loading" role="status">正在打开配置…</div>
+  <form id="wizard" autocomplete="off" novalidate hidden>
+    <header>
+      <div class="progress" aria-label="配置进度"><span id="counter"></span><span id="track"><i></i><i></i><i></i></span></div>
+      <h1 id="title" tabindex="-1">选择翻译服务</h1>
+    </header>
+    <main>
+      <section id="providers" hidden aria-label="翻译服务">
+        <fieldset class="choices">
+          <legend class="sr">翻译服务</legend>
+          <label><input type="radio" name="service" value="Credits"><span class="choice"><strong>账号积分服务 <small>推荐</small></strong><span>使用无言势账号，每次完整翻译成功扣 1 积分</span></span></label>
+          <label><input type="radio" name="service" value="OpenAI"><span class="choice"><strong>使用自己的 API 服务</strong><span>连接支持图片或文字的云端、本机模型</span></span></label>
+          <label><input type="radio" name="service" value="Codex"><span class="choice"><strong>连接本机 Codex</strong><span>使用本机已登录的 Codex 翻译</span></span></label>
+          <label><input type="radio" name="service" value="GoogleTranslate"><span class="choice"><strong>本地 OCR + Google 翻译</strong><span>本机识别文字，通过 Google 翻译网页获取译文</span></span></label>
+        </fieldset>
+      </section>
+      <section id="account" hidden aria-label="账号登录">
+        <p id="origin" class="hint" hidden></p>
+        <div class="field"><label for="uname">用户名</label><input id="uname" maxlength="32" autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="输入用户名"></div>
+        <div class="field"><label for="pwd">密码</label><input id="pwd" type="password" maxlength="128" autocomplete="off" placeholder="输入密码"></div>
+        <div id="verification" hidden>
+          <div class="field"><label for="confirm">确认密码</label><input id="confirm" type="password" maxlength="128" autocomplete="off"></div>
+          <div class="field"><label for="email">邮箱</label><input id="email" type="email" maxlength="254" placeholder="name@example.com"></div>
+          <div class="field"><label for="code">邮箱验证码</label><div class="code-row"><input id="code" inputmode="numeric" maxlength="6" placeholder="6 位数字"><button id="send-code" type="button">获取验证码</button></div></div>
+          <p id="code-notice" class="hint" role="status" hidden></p>
+        </div>
+        <button id="register" type="button" class="link" hidden>注册新账号</button>
+      </section>
+      <section id="config" hidden aria-label="服务配置">
+        <div id="api" hidden>
+          <div class="field"><label for="preset">服务商预设</label><select id="preset"></select></div>
+          <div class="field"><label for="url">API 地址</label><input id="url" type="url" maxlength="2048" spellcheck="false" placeholder="https://…/v1"></div>
+          <div class="field"><label for="model">模型名称</label><input id="model" maxlength="256" spellcheck="false" placeholder="服务商提供的模型名称"></div>
+          <div class="field"><label for="key">API 密钥</label><input id="key" type="password" maxlength="8192" autocomplete="off" placeholder="本机服务可留空"><label id="remove-key" class="check" hidden><input id="clear-key" type="checkbox">清除已保存的密钥</label></div>
+          <details><summary>请求选项</summary>
+            <div class="field"><label for="detail">图片精度</label><select id="detail"><option value="Default">遵循服务默认</option><option value="High">高</option><option value="Low">低</option><option value="Auto">自动</option></select></div>
+            <label class="check"><input id="stream" type="checkbox">流式请求</label>
+          </details>
+        </div>
+        <div id="codex" hidden>
+          <div class="field"><label for="codex-model">Codex 模型</label><input id="codex-model" maxlength="256" spellcheck="false" placeholder="留空使用 CLI 默认模型"></div>
+          <div class="field"><label for="reason">思考程度</label><select id="reason"><option value="">自动（按阶段）</option><option>low</option><option>medium</option><option>high</option></select></div>
+          <details><summary>程序位置</summary><div class="field"><label for="exe">Codex 路径</label><input id="exe" maxlength="4096" placeholder="留空自动查找 Codex CLI"></div></details>
+        </div>
+        <div class="field"><label for="processing">识图方式</label><select id="processing"><option value="Ocr">本地 OCR（不推荐）</option><option value="Image">直接发送截图给模型</option><option value="Handwriting">手写体 OCR（AI）</option><option value="LocalJapanese">本地日语手写 OCR</option></select></div>
+        <div class="field"><label for="target">目标语言</label><input id="target" maxlength="100" placeholder="例如：简体中文"></div>
+      </section>
+      <section id="screen" hidden aria-label="使用模式">
+        <fieldset class="choices">
+          <legend class="sr">使用模式</legend>
+          <label><input type="radio" name="runtime" value="Auto"><span class="choice"><strong>自动切换 <small>推荐</small></strong><span>平时用桌面，检测到 SteamVR 已运行时切到头显</span></span></label>
+          <label><input type="radio" name="runtime" value="Desktop"><span class="choice"><strong>固定桌面</strong><span>始终截取主屏，在桌面下方显示译文</span></span></label>
+          <label><input type="radio" name="runtime" value="SteamVR"><span class="choice"><strong>优先 SteamVR</strong><span>手动打开 SteamVR 后使用头显，等待期间可用桌面</span></span></label>
+        </fieldset>
+        <div class="field"><label for="hotkey">截图快捷键</label><input id="hotkey" maxlength="100" spellcheck="false" placeholder="Ctrl+Alt+T"></div>
+        <details id="vr-options"><summary>头显选项</summary>
+          <div class="field"><label for="capture">头显中的画面来源</label><select id="capture"><option>VR 左眼</option><option>桌面主显示器</option></select></div>
+          <label class="check"><input id="controller" type="checkbox">启用 VR 手柄按键</label>
+        </details>
+        <p id="disclosure" class="hint"></p>
+      </section>
+    </main>
+    <footer>
+      <p id="error" role="alert" hidden></p>
+      <div class="actions"><button id="back" type="button">退出</button><button id="next" type="submit" class="primary" disabled>下一步</button></div>
+    </footer>
+  </form>
+</body>
+</html>

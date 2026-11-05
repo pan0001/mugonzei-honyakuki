@@ -97,7 +97,7 @@ internal sealed partial class MainForm
         string[] titles = ["翻译工作台", "AI 服务", "截图与按键", "字幕显示"];
         string[] descriptions = ["截取眼前画面，或用手柄框选文字并固定译文。", "选择识别方式与翻译服务，支持视觉模型直接读图。", "设置画面来源、识别范围，以及触发翻译的方式。", "设置普通字幕；框选译文保留在原位。"];
         pageTitle.Text = titles[index];
-        pageDescription.Text = index == 0 && settings.DesktopMode ? "按全局快捷键截取主显示器，在桌面字幕中阅读译文。" : descriptions[index];
+        pageDescription.Text = index == 0 && ActiveDesktopMode ? "按全局快捷键截取主显示器，在桌面字幕中阅读译文。" : descriptions[index];
         for (int i = 0; i < navigation.Count; i++) navigation[i].Selected = i == index;
         saveSettings.Visible = index != 0;
     }
@@ -312,7 +312,7 @@ internal sealed partial class MainForm
         showGoogleBrowser.Click += async (_, _) => await ShowGoogleBrowser();
         target.TextChanged += (_, _) => { if (googleTranslationCheck is null && googleTestResult.Text.Length > 0) googleTestResult.Text = "目标语言已变更，请重新测试谷歌翻译。"; };
         captureMode.Items.AddRange(["VR 左眼", "桌面主显示器"]);
-        workspaceMode.Items.AddRange(["SteamVR · 头显字幕", "桌面 · 主显示器字幕"]);
+        workspaceMode.Items.AddRange(["SteamVR · 等待头显", "桌面 · 主显示器字幕", "自动 · 跟随 SteamVR"]);
         workspaceMode.SelectedIndexChanged += (_, _) =>
         {
             bool useVr = workspaceMode.SelectedIndex != 1;

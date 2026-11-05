@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'none'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<title>账号与积分</title><link rel="stylesheet" href="account.css"><script src="account.js" defer></script></head>
+<body><main>
+  <header><div><h1>账号与积分</h1><p id="identity">正在读取账户…</p></div><div class="actions"><button id="refresh" type="button">刷新</button><button id="logout" type="button">退出登录</button></div></header>
+  <p id="notice" role="status" aria-live="polite"></p>
+  <div id="content" hidden>
+    <nav aria-label="账户页面"><button type="button" data-page="overview" aria-pressed="true">账户</button><button type="button" data-page="history" aria-pressed="false">订单与流水</button><button type="button" data-page="recovery" aria-pressed="false">最近译文</button></nav>
+    <section id="overview" aria-label="账户">
+      <div class="balance"><div><span>可用积分</span><strong id="available">—</strong></div><p id="details">尚未读取余额</p></div>
+      <h2>兑换积分</h2><form id="redeem-form"><label class="sr" for="code">兑换码</label><input id="code" type="password" maxlength="128" placeholder="输入兑换码" autocomplete="off" required><button type="submit">兑换</button></form>
+      <h2>积分充值</h2><div id="plans" class="plans"><p class="empty">正在读取积分包…</p></div>
+    </section>
+    <section id="history" aria-label="订单与流水" hidden>
+      <h2>充值订单</h2><div id="orders"><p class="empty">正在读取订单…</p></div>
+      <h2>积分流水</h2><div id="ledger"><p class="empty">正在读取流水…</p></div>
+    </section>
+    <section id="recovery" aria-label="最近译文" hidden>
+      <h2>最近一次翻译</h2><p class="muted">从服务器取回当前账号上次提交的任务，恢复译文不消耗积分。</p>
+      <div class="actions"><button id="recover" type="button">恢复最近任务</button><button id="cancel" type="button">取消最近任务</button></div>
+      <p id="task-status" role="status"></p><div id="task-text" hidden><h3>原文</h3><pre id="source"></pre><h3>译文</h3><pre id="translation"></pre></div>
+    </section>
+  </div>
+</main></body></html>

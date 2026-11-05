@@ -22,13 +22,17 @@ internal sealed partial class MainForm
         creditAccountButton.Click += (_, _) => TryAction(OpenCreditAccount);
     }
 
-    private void OpenCreditAccount()
+    private void OpenCreditAccount() => OpenAccountPage(loginOnly: false);
+
+    private void OpenAccountPage(bool loginOnly)
     {
         if (closing || setupDialogOpen) return;
         if (busy || selectionActive || selectionCapture is not null || loginCheck is not null
             || apiVisionCheck is not null || googleTranslationCheck is not null)
             throw new InvalidOperationException("请先完成或取消当前任务，再管理账号与积分。");
-        _ = CreditServiceClient.NormalizeServerUrl(creditServer.Text.Trim());
+        string destination = CreditServiceClient.NormalizeServerUrl(creditServer.Text.Trim());
+        if (destination != CreditServiceClient.NormalizeServerUrl(settings.CreditServerUrl))
+            throw new InvalidOperationException("积分服务器地址已修改，请先保存偏好，再登录此服务器。");
         bool resumePolling = pollTimer.Enabled;
         setupDialogOpen = true;
         pollTimer.Stop();
@@ -37,17 +41,14 @@ internal sealed partial class MainForm
             vr.ResetTranslationInput();
             TryAction(HideHoldOverlay);
             var draft = ReadSettingsDraft();
-            if (Program.NeedsAccountSignIn(draft, new CreditSessionStore().Load))
+            if (loginOnly || string.IsNullOrEmpty(ReadWebAccountName()))
             {
-                using var login = new SetupWizardForm(draft, SaveSettings, firstRun: false, startAtLogin: true);
-                if (login.ShowDialog(this) == DialogResult.OK) LoadSettings();
-                return;
+                using var login = new WebSetupForm(draft, _ => { }, firstRun: false, startAtLogin: true, loginOnly: true);
+                if (login.ShowDialog(this) != DialogResult.OK || loginOnly) return;
             }
-            using var account = new CreditAccountForm(creditServer.Text.Trim());
+            using var account = new WebCreditAccountForm(destination);
             account.ShowDialog(this);
-            // The server selection remains a settings draft until the user saves it.
-            creditServer.Text = account.ServerUrl;
-            creditBalanceNote.Text = "账号保存在对应服务地址下。服务地址有改动时，请保存设置后开始翻译。";
+            creditBalanceNote.Text = "账户中心已关闭。";
         }
         finally
         {

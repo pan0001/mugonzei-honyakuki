@@ -7,20 +7,27 @@ public static class DesktopModeTests
     public static Task RunAsync() => DesktopResponsivenessTests.OnUiThread(() =>
     {
         CheckStoredModes();
+        CheckAutomaticSelection();
+        if (SteamVrPresence.ReadServerPid() == 0)
+        {
+            using var passive = new VrService();
+            Require(!passive.Connect() && !passive.IsConnected && passive.Status.Contains("未就绪"),
+                "The real OpenVR service refuses to initialize when SteamVR is closed");
+        }
         CheckQueuedPixels();
         using var form = new MainForm(true);
         try
         {
             var settings = Field<AppSettings>(form, "settings");
-            Require(!settings.DesktopMode, "Legacy configurations start in SteamVR mode");
+            Require(settings.RuntimeMode == "Auto" && form.ActiveDesktopMode, "Automatic mode starts on desktop until a runtime is connected");
             settings.CaptureMode = "VR 左眼";
-            settings.DesktopMode = true;
+            form.SetRuntimeMode("Desktop");
             Invoke(form, "LoadSettings");
             Invoke(form, "ApplyCaptureEnvironment");
             Invoke(form, "ConnectVr");
             Invoke(form, "Poll");
             Require(Field<VrService>(form, "vr").Status == "尚未连接 SteamVR", "Desktop mode skips connection, manual reconnect and input polling");
-            Require(form.ReadSettingsDraft().DesktopMode && form.ReadSettingsDraft().CaptureMode == "VR 左眼",
+            Require(form.ReadSettingsDraft().RuntimeMode == "Desktop" && form.ReadSettingsDraft().CaptureMode == "VR 左眼",
                 "Editing desktop preferences preserves the saved VR capture source");
             Invoke(form, "ShowDemo");
             var subtitle = Field<DesktopSubtitleForm>(form, "desktopSubtitle");
@@ -33,7 +40,11 @@ public static class DesktopModeTests
             Invoke(form, "Poll");
             Require(!subtitle.Visible, "Desktop subtitle expiry works without VR polling");
             Field<ComboBox>(form, "workspaceMode").SelectedIndex = 0;
-            Require(!form.ReadSettingsDraft().DesktopMode, "The workbench can switch back to SteamVR");
+            Require(form.ReadSettingsDraft().RuntimeMode == "SteamVR", "The workbench can select SteamVR");
+            form.SetRuntimeMode("SteamVR");
+            Require(form.ActiveDesktopMode && settings.CaptureMode == "VR 左眼", "Selecting VR before the server starts keeps desktop capture available");
+            form.SetRuntimeMode("Auto");
+            Require(form.ReadSettingsDraft().RuntimeMode == "Auto", "Automatic detection can be selected again");
             CheckConflictingShortcuts(form.Handle);
         }
         finally { Invoke(form, "DisposeServices"); }
@@ -46,14 +57,22 @@ public static class DesktopModeTests
         string directory = Directory.CreateTempSubdirectory("MugonzeiDesktopMode-").FullName;
         try
         {
-            File.WriteAllText(Path.Combine(directory, "settings.json"),
+            string path = Path.Combine(directory, "settings.json");
+            File.WriteAllText(path,
                 """{"Version":1,"Settings":{"CaptureMode":"桌面主显示器","Hotkey":"Ctrl+Alt+Y"}}""");
             var old = SettingsStore.Load(directory);
-            Require(!old.DesktopMode && old.CaptureMode == "桌面主显示器", "Older desktop-source configurations retain VR output");
-            old.DesktopMode = true;
+            Require(old.RuntimeMode == "Auto" && old.CaptureMode == "桌面主显示器", "Older configurations use detection and retain the VR capture source");
+            File.WriteAllText(path, """{"Version":1,"Settings":{"DesktopMode":false}}""");
+            Require(SettingsStore.Load(directory).RuntimeMode == "Auto", "The old default follows runtime detection");
+            File.WriteAllText(path, """{"Version":1,"Settings":{"RuntimeMode":"Auto","DesktopMode":true}}""");
+            Require(SettingsStore.Load(directory).RuntimeMode == "Auto", "A new explicit preference supersedes the legacy desktop flag");
+            File.WriteAllText(path,
+                """{"Version":1,"Settings":{"DesktopMode":true,"CaptureMode":"桌面主显示器","Hotkey":"Ctrl+Alt+Y"}}""");
+            old = SettingsStore.Load(directory);
+            Require(old.RuntimeMode == "Desktop", "An explicit legacy desktop choice stays pinned after upgrade");
             SettingsStore.Save(old, directory);
             var saved = SettingsStore.Load(directory);
-            Require(saved.DesktopMode && saved.Hotkey == "Ctrl+Alt+Y" && saved.CaptureMode == old.CaptureMode,
+            Require(saved.RuntimeMode == "Desktop" && saved.Hotkey == "Ctrl+Alt+Y" && saved.CaptureMode == old.CaptureMode,
                 "Desktop mode, capture source and custom shortcut survive a restart");
         }
         finally
@@ -61,6 +80,45 @@ public static class DesktopModeTests
             File.Delete(Path.Combine(directory, "settings.json"));
             Directory.Delete(directory);
         }
+    }
+
+    private static void CheckAutomaticSelection()
+    {
+        int pid = 0, attempts = 0, probes = 0;
+        bool connected = false, ready = true;
+        var monitor = new RuntimeModeMonitor(
+            () => { probes++; return Task.FromResult(pid); },
+            () => connected,
+            () => { attempts++; return connected = ready; },
+            () => connected = false);
+        monitor.Check("Auto", 0);
+        monitor.Check("SteamVR", 1000);
+        Require(!connected && attempts == 0 && probes == 1, "Absent SteamVR never reaches native initialization, including manual VR selection");
+        pid = 101;
+        monitor.Check("Auto", 2000);
+        Require(connected && attempts == 1, "SteamVR started outside the translator automatically becomes the output");
+        monitor.Check("Desktop", 2010);
+        monitor.Check("Desktop", 10000);
+        Require(!connected && probes == 2 && attempts == 1, "Manual desktop disconnects and suppresses probing while SteamVR is running");
+        monitor.Check("Auto", 10001);
+        Require(connected && attempts == 2, "Returning to automatic reattaches to the running instance");
+        connected = false;
+        monitor.RuntimeQuit();
+        monitor.Check("Auto", 10002);
+        monitor.Check("Auto", 18000);
+        Require(!connected && attempts == 2, "A retiring server cannot be reattached even if its process lingers");
+        pid = 0;
+        monitor.Check("Auto", 20000);
+        pid = 102; ready = false;
+        monitor.Check("SteamVR", 22000);
+        monitor.Check("SteamVR", 22016);
+        Require(!connected && attempts == 3, "A starting but unready runtime leaves desktop usable and retries with backoff");
+        ready = true;
+        monitor.Check("SteamVR", 26000);
+        Require(connected && attempts == 4, "The new SteamVR instance is attached once ready");
+        pid = 0;
+        monitor.Check("SteamVR", 28000);
+        Require(!connected && attempts == 4, "Disappearing processes restore desktop without an initialization call");
     }
 
     private static void CheckConflictingShortcuts(IntPtr window)
@@ -110,6 +168,7 @@ public static class DesktopModeTests
         {
             var settings = Field<AppSettings>(form, "settings");
             settings.DesktopMode = true;
+            settings.RuntimeMode = "Desktop";
             settings.Hotkey = "Ctrl+Alt+Shift+F23";
             settings.ProcessingMode = "Image";
             settings.TranslationBackend = "OpenAI";

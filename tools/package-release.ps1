@@ -60,7 +60,7 @@ function Test-ExcludedPath([string]$RelativePath) {
     # Generated caches and the machine-specific SteamVR registration are never shipped.
     if ($name -match '(^|/)__pycache__(/|$)' -or $name -match '\.(pyc|pyo|pdb|vrmanifest)$') { return $true }
     # Do not traverse or read accidental local user artifacts in a reused publish directory.
-    if ($name -match '(^|/)(artifacts|screenshots|captures|CreditSessions|data|GoogleWebView2|[^/]+\.WebView2|\.git|\.codex)(/|$)') { return $true }
+    if ($name -match '(^|/)(artifacts|screenshots|captures|CreditSessions|data|GoogleWebView2|DesktopWebUI|[^/]+\.WebView2|\.git|\.codex)(/|$)') { return $true }
     if ($name -match '\.(db|db-shm|db-wal|sqlite|sqlite-shm|sqlite-wal)$') { return $true }
     if ($name -match '(^|/)(redemption|redeem)-codes[^/]*\.json$') { return $true }
     if ($name -match '(^|/)(settings\.json|auth\.json|credentials\.json|\.env(?:\..*)?|runtime-faults\.jsonl(?:\.previous)?|[^/]*-diagnostics\.json|baseline-[^/]*\.json)$') { return $true }
@@ -107,6 +107,9 @@ $required = @(
     'licenses/WindowsDesktopRuntime-LICENSE.txt', 'licenses/DotNetRuntime-manifest.json',
     'assets/actions.json', 'assets/bindings_oculus_touch.json',
     'assets/bindings_knuckles.json', 'assets/bindings_vive_controller.json',
+    'assets/webui/workspace.html', 'assets/webui/workspace.css', 'assets/webui/workspace.js',
+    'assets/webui/setup.html', 'assets/webui/setup.css', 'assets/webui/setup.js',
+    'assets/webui/account.html', 'assets/webui/account.css', 'assets/webui/account.js',
     'local-ocr-runtime/runtime-manifest.json', 'local-ocr-runtime/local-japanese-ocr-worker.py',
     'WebView2Loader.dll', 'runtimes/win-x64/native/WebView2Loader.dll',
     'Microsoft.Web.WebView2.Core.dll', 'Microsoft.Web.WebView2.WinForms.dll'

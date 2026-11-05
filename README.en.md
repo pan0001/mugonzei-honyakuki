@@ -10,7 +10,11 @@ Translate handwritten or printed text on a Windows desktop or in SteamVR, with s
 
 [Download for Windows](https://github.com/pan0001/mugonzei-honyakuki/releases) · [Report an issue](https://github.com/pan0001/mugonzei-honyakuki/issues)
 
-![Desktop workspace preview with fixed example content](docs/images/workspace.png)
+**Example: translating a station sign into Simplified Chinese**
+
+| Screenshot preview | Translation | Recognized text |
+| --- | --- | --- |
+| A Japanese station sign | 下一班列车将于 10 点到达。 | 次の電車は 10 時に到着します。 |
 
 > Experimental Windows x64 application. Handwriting recognition can misread or omit characters; check the result against the original image. This project is independent of SteamVR, VRChat, and the AI service providers.
 
@@ -31,7 +35,7 @@ Translate handwritten or printed text on a Windows desktop or in SteamVR, with s
 - Windows x64. Desktop mode requires no SteamVR or headset. VR mode requires a compatible headset and controllers.
 - Codex mode: an installed Codex CLI with an active login. It calls an online model; inference is not offline.
 - Other AI APIs: an available compatible service. Image analysis requires image input support, and AI handwriting mode also requires support for multiple images in one request.
-- Google Translate webpage mode: an internet connection and Microsoft Edge WebView2 Runtime.
+- The embedded interface requires the [Microsoft Edge WebView2 Runtime](https://developer.microsoft.com/microsoft-edge/webview2/). It loads from the installed files. Google Translate also requires internet access.
 - The portable package includes the .NET runtime, Tesseract language models, and the local Japanese OCR runtime. Building from source requires the .NET 10 SDK and an internet connection when preparing dependencies for the first time.
 
 The desktop interface is currently mainly in Simplified Chinese. This repository provides documentation in Chinese, Japanese, and English. Chinese UI labels are retained below so you can find the corresponding controls.
@@ -40,10 +44,12 @@ The desktop interface is currently mainly in Simplified Chinese. This repository
 
 1. [Download the published Windows portable build](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.3-preview/Mugonzei-Honyakuki-win-x64-v0.2.3-preview.zip), extract the complete archive, and run `SteamVrTranslator.exe`. GitHub’s `Source code` ZIP is for developers. The steps below describe the development build; the published v0.2.3 interface differs.
 2. Choose the account credit service, your own API, local Codex, or local OCR with Google Translate.
-3. The credit service opens a dedicated sign-in page. Enter your username and password; signing in takes you directly to screen selection. New users can follow the registration link. Top-ups, redemption codes and orders are under Accounts & Credits in the workspace. Other providers do not require a credit account.
-4. Choose Desktop (「桌面」) or SteamVR, then Start (「开始使用」). In desktop mode, press **Ctrl+Alt+T** in another app to translate the primary monitor and read the subtitle near the bottom of the screen. The hotkey is configurable. In SteamVR, hold **left X for 1.5 seconds** to capture and translate or **3 seconds** to cancel.
+3. The credit service opens a dedicated sign-in page before mode selection. Your own API, Codex and Google Translate do not require a credit account.
+4. Leave the mode on Auto: **Ctrl+Alt+T** captures your primary monitor until you start SteamVR yourself. After it connects, hold **left X for 1.5 seconds** to translate. Closing SteamVR returns to the desktop. Select Desktop to stay there, or Auto to resume following SteamVR. No mode launches SteamVR.
 
-Existing settings are preserved. Credit mode prompts for sign-in when no valid local session is available. To reconfigure, open AI Services → Setup Wizard or launch `SteamVrTranslator.exe --setup`.
+The workspace has three actions: capture and translate, cancel, and keep the current screenshot. It shows the screenshot, translation and original text read from the image. The Account & AI Services page has three sections in order: Sign in, Preferences, and Credits. Signing in there does not change your translation provider.
+
+Open Account & AI Services → Preferences to change providers or rerun setup. Existing settings and saved keys are preserved.
 
 「检测 Codex 登录」 (Check Codex Login) only checks login status. 「测试字幕」 (Test Subtitles) only displays a fixed example sentence. Use a recognition button to check the source text first; AI recognition buttons still send images. Minimizing keeps the app in the system tray; closing the window exits the app.
 
@@ -77,15 +83,15 @@ AI handwriting recognition usually makes two vision requests, with one additiona
 
 ### Credit service and Afdian
 
-The public account backend is live. First-time setup selects 「账号积分服务（推荐）」 (Account Credit Service, Recommended) with `https://api.mugonzei.top` already filled in. Step two is for sign-in only; top-ups and redemptions are available in the workspace. You can also select 「积分服务（爱发电）」 on the main 「AI 服务」 page, confirm and save the server address, then open 「账号与积分」. The [website account center](https://mugonzei.top/account.html) uses the same account, balance, and records as the desktop app. Website session tokens remain only in the current page's memory; reloading or closing the page requires signing in again.
+The public account backend is live. First-time setup selects 「账号积分服务（推荐）」 (Account Credit Service, Recommended) with `https://api.mugonzei.top` already filled in. Step two is for sign-in only; in the workspace, sign in under 「账号与 AI 服务 → 账号登录」 and use 「积分服务 → 打开积分服务」 to check your balance, top up, or redeem a code. You can open your credit account without changing your translation provider. The [website account center](https://mugonzei.top/account.html) uses the same account, balance, and records as the desktop app. Website session tokens remain only in the current page's memory; reloading or closing the page requires signing in again.
 
-New registrations require email verification. In the desktop account window or the website’s Create Account tab, enter your email, request a code, and enter the six digits from the message within ten minutes. The email code is separate from a credit redemption code. Existing users keep their balance and sign in with their original username and password. The website and desktop use the same official account server by default. If you select a custom server, its operator stores your account data.
+New registrations require email verification. On the registration page reached from desktop sign-in or the website’s Create Account tab, enter your email, request a code, and enter the six digits from the message within ten minutes. The email code is separate from a credit redemption code. Existing users keep their balance and sign in with their original username and password. The website and desktop use the same official account server by default. If you select a custom server, its operator stores your account data.
 
 If you host the service with Alibaba Cloud DirectMail, check the primary account’s remaining free allowance and set the [registration email limit](server/deploy/README.md#注册邮件与账户存储). The server sends at most 200 emails in any 24 hours. Once it reaches the lifetime limit, it stops sending codes. Existing users can still sign in.
 
 **The public service offers hosted translation and Afdian top-ups. CNY 5 buys 200 credits and CNY 10 buys 500 credits.** Sign in to the translator account you want to credit, select a plan, and create an order. Follow its payment link to Afdian, select one month, and check the total before paying. Return to your account and select 「核验到账」 on that order to verify the payment and check your balance. The first real payment has yet to be verified through to the account balance. You can also redeem a code from the operator or continue using your own Codex, AI API, or Google Translate service. Existing settings are not automatically switched to the public address; `http://127.0.0.1:5187` in older settings is for a development server you run yourself.
 
-If the operator provides a redemption code, enter it in the website account center or the desktop 「账号与积分」 → 「登录与余额」 (Account and Credits → Login and Balance) tab, then click 「兑换积分」 (Redeem Credits). Both use the same balance for the same account and service. Each code credits an account only once; retrying with that account returns the original redemption result. The server checks its credit amount, expiry, and availability. Invalid, expired, or already claimed codes neither add nor deduct credits. The desktop app does not save codes; successful redemptions appear as 「兑换码入账」 in the ledger. Redeeming credits does not change translation service availability; check the status shown in the client.
+If the operator provides a redemption code, enter it in the website account center or the desktop 「积分服务 → 打开积分服务 → 账户」 (Credit Service → Open Credit Service → Account), then click 「兑换」 (Redeem). Both use the same balance for the same account and service. Each code credits an account only once; retrying with that account returns the original redemption result. The server checks its credit amount, expiry, and availability. Invalid, expired, or already claimed codes neither add nor deduct credits. The desktop app does not save codes; successful redemptions appear as 「兑换码入账」 in the ledger. Redeeming credits does not change translation service availability; check the status shown in the client.
 
 - One complete successful task costs **one credit**, including all recognition and translation stages. Image/handwriting mode transcribes Chinese, Japanese, or English before translating, and does not generate scene descriptions for text-free images. Local OCR modes only send recognized text.
 - No text, failure, or cancellation before server completion costs nothing. Hiding a completed result does not refund it. Repeatedly querying the same task does not charge again; use the account window to recover the latest task after a disconnect.
@@ -152,7 +158,7 @@ The frame is fixed in SteamVR tracking space. It does not automatically follow g
 - Cloud vision models receive screenshots. With local OCR, only the recognized text is sent to the selected translation service. The entire process can be offline only when both recognition and translation use local services.
 - Codex and local Japanese OCR create temporary PNG files and attempt to clean them up on completion, failure, or cancellation. Forced termination or a power outage can leave temporary files behind.
 - The Google webpage uses a separate `GoogleWebView2/` data directory. It does not share your personal browser login, but it retains website cookies and cache.
-- The desktop app does not automatically save screenshots; 「保存当前截图」 (Save Current Screenshot) is a manual action. Your own providers do not save translation history. The credit server retains recent source text and translations for recovery, plus order and credit records. Development diagnostics separately write images, source text, or result reports.
+- The desktop app does not automatically save screenshots; 「保留当前截图」 (Save Current Screenshot) is a manual action. Your own providers do not save translation history. The credit server retains recent source text and translations for recovery, plus order and credit records. Development diagnostics separately write images, source text, or result reports.
 - Redact private information before submitting an issue. Do not upload settings, credentials, personal screenshots, or entire diagnostic directories.
 
 ## Building from source

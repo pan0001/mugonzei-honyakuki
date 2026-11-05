@@ -18,13 +18,15 @@ internal sealed partial class MainForm : Form
     private readonly Label status = new() { AutoSize = true, ForeColor = Accent, Padding = new Padding(4, 8, 4, 8) };
     private readonly Label vrStatus = new() { AutoSize = true, ForeColor = Ink, MaximumSize = new Size(1000, 0) };
     private readonly TextBox sourceText = Readout();
+    private string? sourceHint;
     private readonly TextBox translatedText = Readout();
     private readonly PictureBox preview = new() { Dock = DockStyle.Fill, SizeMode = PictureBoxSizeMode.Zoom, BackColor = Color.FromArgb(10, 14, 21) };
     private readonly UiCard imageBox = new() { Text = "截图预览", Caption = "每次触发都会获取新的画面", Dock = DockStyle.Fill, Margin = new Padding(0, 0, 12, 14) };
     private readonly LatestCaptureRequests captureRequests = new();
     private readonly VrFrameGuard holdFrames = new(), selectionFrames = new(), expiryFrames = new();
-    private long reconnectAt, healthyInputSince;
-    private int reconnectAttempts;
+    private readonly RuntimeModeMonitor runtimeMonitor;
+    private bool? displayedDesktop;
+    internal bool ActiveDesktopMode => !vr.IsConnected;
     private readonly TextBox endpoint = Input(), model = Input(), apiKey = Input(), target = Input(), languages = Input(), hotkeyText = Input();
     private readonly TextBox codexPath = Input(), codexModel = Input();
     private readonly ComboBox codexReasoningEffort = new UiComboBox() { Name = "codexReasoningEffort", DropDownStyle = ComboBoxStyle.DropDownList, Width = 220 };
@@ -82,9 +84,12 @@ internal sealed partial class MainForm : Form
     private bool busy, closing, overlayVisible, disposedServices, setupDialogOpen;
     private readonly bool demo;
 
-    public MainForm(bool demo)
+    public MainForm(bool demo, bool useWebUi = false, string? webProfileDirectory = null)
     {
         this.demo = demo;
+        runtimeMonitor = new RuntimeModeMonitor(
+            demo ? () => Task.FromResult(0) : () => Task.Run(SteamVrPresence.ReadServerPid),
+            () => vr.IsConnected, vr.Connect, vr.Disconnect);
         string? loadError = null;
         try { settings = demo ? new AppSettings() : SettingsStore.Load(); }
         catch (Exception ex) { settings = new AppSettings(); loadError = "配置加载失败：" + ex.Message; }
@@ -92,10 +97,10 @@ internal sealed partial class MainForm : Form
         Font = new Font("Microsoft YaHei UI", 10);
         BackColor = Background;
         ForeColor = Ink;
-        MinimumSize = new Size(1120, 780);
+        MinimumSize = useWebUi ? new Size(660, 500) : new Size(1120, 780);
         Size = new Size(1280, 900);
         StartPosition = FormStartPosition.CenterScreen;
-        BuildUi();
+        if (useWebUi) BuildWebWorkspace(webProfileDirectory); else BuildUi();
         LoadSettings();
         cancelButton.Enabled = false;
         saveScreenshotButton.Enabled = false;
@@ -120,6 +125,13 @@ internal sealed partial class MainForm : Form
         Resize += (_, _) => { if (WindowState == FormWindowState.Minimized) { tray.Visible = true; Hide(); } };
         Shown += (_, _) =>
         {
+            // An isolated demo window can exercise the real browser and bridge beside the
+            // installed client without registering a second set of global keys or subtitles.
+            if (demo && webProfileDirectory is not null)
+            {
+                ApplyCaptureEnvironment();
+                SetStatus("本地界面预览"); return;
+            }
             hotkeys = new Hotkeys(Handle);
             var shortcutErrors = new List<string>();
             try
@@ -157,6 +169,9 @@ internal sealed partial class MainForm : Form
     }
 
     private void LoadSettings()
+        => LoadEditorValues(settings);
+
+    private void LoadEditorValues(AppSettings settings)
     {
         backend.SelectedIndex = settings.TranslationBackend switch { "OpenAI" => 1, "GoogleTranslate" => 2, "Credits" => 3, _ => 0 };
         creditServer.Text = settings.CreditServerUrl;
@@ -167,7 +182,7 @@ internal sealed partial class MainForm : Form
         apiImageDetail.SelectedIndex = settings.ApiImageDetail switch { "High" => 1, "Low" => 2, "Auto" => 3, _ => 0 };
         apiStream.Checked = settings.ApiStream;
         target.Text = settings.TargetLanguage; languages.Text = settings.OcrLanguages; hotkeyText.Text = settings.Hotkey;
-        workspaceMode.SelectedIndex = settings.DesktopMode ? 1 : 0;
+        workspaceMode.SelectedIndex = RuntimeModeIndex(settings.RuntimeMode);
         captureMode.SelectedItem = settings.CaptureMode; if (captureMode.SelectedIndex < 0) captureMode.SelectedIndex = 0;
         Put(cropX, settings.CropX * 100); Put(cropY, settings.CropY * 100); Put(cropW, settings.CropWidth * 100); Put(cropH, settings.CropHeight * 100);
         Put(overlayWidth, settings.OverlayWidth); Put(overlayDistance, settings.OverlayDistance); Put(overlayY, settings.OverlayVerticalOffset); Put(duration, settings.DisplaySeconds);
@@ -254,14 +269,7 @@ internal sealed partial class MainForm : Form
         || settings.ApiKey != apiKey.Text.Trim() || settings.TargetLanguage != target.Text.Trim();
 
     private string ReadyMessage() => settings.TranslationBackend == "Credits"
-        ? "就绪 · 积分服务，完整翻译成功扣 1 积分；请先在「AI 服务 → 账号与积分」登录。"
-        : settings.TranslationBackend == "GoogleTranslate"
-        ? "就绪 · 本地 OCR → Google Translate 后台网页，按 " + settings.Hotkey + " 翻译；可在「AI 服务」测试连接。"
-        : settings.ProcessingMode == "LocalJapanese"
-        ? "就绪 · 本地日语手写 OCR，按 " + settings.Hotkey + " 识别并翻译；「仅识别日语（本地）」可离线使用。"
-        : settings.TranslationBackend == "Codex"
-        ? "就绪 · 使用本机 Codex 登录，按 " + settings.Hotkey + " 翻译；可在「AI 服务」检测登录。"
-        : "就绪 · 使用其他 AI API，按 " + settings.Hotkey + " 翻译；可在「AI 服务」测试图片识别。";
+        ? "就绪 · 每次成功翻译使用 1 积分" : "就绪";
 
     private string SelectedApiImageDetail => apiImageDetail.SelectedIndex switch { 1 => "High", 2 => "Low", 3 => "Auto", _ => "Default" };
     private string SelectedCodexReasoningEffort => codexReasoningEffort.SelectedIndex switch { 1 => "low", 2 => "medium", 3 => "high", _ => "" };
@@ -394,6 +402,7 @@ internal sealed partial class MainForm : Form
             ApiBaseUrl = endpoint.Text.Trim(), ApiModel = model.Text.Trim(), ApiKey = apiKey.Text.Trim(),
             ApiImageDetail = SelectedApiImageDetail, ApiStream = apiStream.Checked,
             TargetLanguage = target.Text.Trim(), OcrLanguages = languages.Text.Trim(), Hotkey = hotkeyText.Text.Trim(),
+            RuntimeMode = workspaceMode.SelectedIndex switch { 0 => "SteamVR", 1 => "Desktop", _ => "Auto" },
             DesktopMode = workspaceMode.SelectedIndex == 1, CaptureMode = captureMode.Text,
             CropX = (float)cropX.Value / 100, CropY = (float)cropY.Value / 100,
             CropWidth = (float)cropW.Value / 100, CropHeight = (float)cropH.Value / 100,
@@ -414,25 +423,19 @@ internal sealed partial class MainForm : Form
         try
         {
             hotkeys?.Register(Hotkeys.Translate, changed.Hotkey);
-            SettingsStore.Save(changed);
+            if (!demo) SettingsStore.Save(changed);
         }
         catch
         {
             try { hotkeys?.Register(Hotkeys.Translate, settings.Hotkey); } catch { }
             throw;
         }
-        bool modeChanged = settings.DesktopMode != changed.DesktopMode;
+        bool modeChanged = settings.RuntimeMode != changed.RuntimeMode;
         settings = changed;
         string? runtimeWarning = null;
         try
         {
-            if (modeChanged)
-            {
-                desktopSubtitle?.Hide();
-                overlayVisible = holdOverlayVisible = false; overlayGestureId = 0; overlayAnchor = null; hideAt = 0;
-                ClearPages();
-                ApplyCaptureEnvironment();
-            }
+            if (modeChanged) ApplyCaptureEnvironment();
             CancelSelectionCapture();
             vr.SelectionEnabled = false;
             ConfigureVrSelection();
@@ -462,7 +465,7 @@ internal sealed partial class MainForm : Form
         {
             vr.ResetTranslationInput();
             TryAction(HideHoldOverlay);
-            using var setup = new SetupWizardForm(ReadSettingsDraft(), SaveSettings, firstRun: false);
+            using var setup = new WebSetupForm(ReadSettingsDraft(), SaveSettings, firstRun: false);
             if (setup.ShowDialog(this) == DialogResult.OK) LoadSettings();
         }
         finally
@@ -479,6 +482,7 @@ internal sealed partial class MainForm : Form
 
     private async Task CaptureAndTranslate(bool ocrOnly, string source = "桌面按钮", long gestureId = 0, SelectionCaptureSnapshot? selection = null)
     {
+        if (webDirty) { SetStatus("请先保存或撤销工作台中尚未应用的设置，再截图。"); return; }
         if (closing || setupDialogOpen) return;
         if (ocrOnly && settings.TranslationBackend == "Credits" && settings.ProcessingMode is "Image" or "Handwriting")
         {
@@ -489,14 +493,14 @@ internal sealed partial class MainForm : Form
         if (googleTranslationCheck is not null) { SetStatus("谷歌翻译测试进行中，请等待完成或先取消测试。"); return; }
         if ((settings.ProcessingMode != SelectedProcessingMode || !ocrOnly || settings.ProcessingMode is "Handwriting" or "Image") && HasPendingAiSettings)
         {
-            SetStatus("AI 设置有未保存改动。请先在「AI 服务」点击「保存设置」，再截屏翻译。");
+            SetStatus("有未保存改动。请先在「账号与 AI 服务 → 偏好」保存设置，再截图翻译。");
             ShowStatus("请先保存 AI 设置");
             return;
         }
         if (selection is null) CancelSelectionCapture();
         else if (!vr.IsAnchorValid(selection.Anchor)) { SetStatus("框选位置已失效，请重新拉框。"); return; }
         Bitmap? desktopImage = null;
-        if (settings.DesktopMode)
+        if (ActiveDesktopMode)
         {
             // Snapshot at the keypress. An earlier OCR/API call may still be winding down.
             try { HideOverlay(); desktopImage = CaptureService.CaptureDesktop(Handle, settings); }
@@ -543,6 +547,7 @@ internal sealed partial class MainForm : Form
             ValidateBackendMode(settings);
             SetStatus($"正在截取第 {number} 张 · {request.Source}…");
             imageBox.Text = $"正在获取截图 #{number} · {request.Source} · 预览暂为上一张";
+            sourceHint = null;
             sourceText.Clear(); translatedText.Clear();
             ClearPages();
             if (cropped is null && request.Selection is { } snapshot)
@@ -553,7 +558,7 @@ internal sealed partial class MainForm : Form
             else if (cropped is null)
             {
                 bool useVrEye = settings.CaptureMode == "VR 左眼";
-                if (useVrEye && !vr.IsConnected && !vr.Connect()) throw new InvalidOperationException(vr.Status);
+                if (useVrEye && !vr.IsConnected) throw new InvalidOperationException("SteamVR 已结束连接，请重新截图。");
                 // Neither subtitles, progress nor a selection frame should appear in a capture.
                 captureInProgress = true;
                 HideOverlay(); HideHoldOverlay(); HideSelectionFrame();
@@ -581,7 +586,7 @@ internal sealed partial class MainForm : Form
             }
             if (!ocrOnly && settings.ProcessingMode == "Image")
             {
-                sourceText.Text = "直接识图模式：将本次截图发送给模型，未运行本地 OCR。\r\n模型会自行组织识别与翻译结果。";
+                sourceHint = "直接识图不单独返回原文，请查看上方的翻译结果。";
                 SetStatus(settings.TranslationBackend == "Codex" ? "正在将截图交给 Codex 直接识图…" : "正在将截图交给兼容 API 的视觉模型…");
                 ShowStatus("正在直接识图…");
                 byte[] png = await Task.Run(() => VisionImage.Prepare(cropped), token);
@@ -638,7 +643,7 @@ internal sealed partial class MainForm : Form
             }
             if (settings.TranslationBackend == "OpenAI" && string.IsNullOrWhiteSpace(settings.ApiModel))
             {
-                SetStatus("截图和识别已完成。请在「AI 服务」填写模型、地址及密钥，再开始翻译。");
+                SetStatus("截图和识别已完成。请在「账号与 AI 服务 → 偏好」填写模型、地址及密钥，再开始翻译。");
                 ShowStatus("识别完成 · 请先配置 AI 服务"); return;
             }
             SetStatus(settings.TranslationBackend switch
@@ -669,7 +674,7 @@ internal sealed partial class MainForm : Form
     {
         vr.SelectionDistance = settings.SelectionDistance;
         vr.SelectionMode = settings.SpatialSelectionEnabled;
-        vr.SelectionEnabled = !settings.DesktopMode && settings.ControllerEnabled && !closing;
+        vr.SelectionEnabled = !ActiveDesktopMode && settings.ControllerEnabled && !closing;
     }
 
     private void UpdateSelectionHelp()
@@ -678,7 +683,7 @@ internal sealed partial class MainForm : Form
         selectionHelp.Text = spatialSelection.Checked
             ? "按住左 X，用双手柄分别指向矩形的两个对角；松开 X 提交。\n仅识别框内，译文留在框的位置，翻页不移动。框选距离为前方平面距离。\n固定在 SteamVR 追踪空间；游戏内传送、移动后不会跟随原物体。桌面按钮和快捷键仍使用普通截图。"
             : "1.5 秒：第一圈完成，截屏并翻译。\n3 秒：第二圈完成，取消本次并隐藏字幕。松开后可再次触发。";
-        if (settings.DesktopMode)
+        if (ActiveDesktopMode)
         {
             workspaceInputHelp.Text = $"桌面模式     按 {settings.Hotkey} 截取主显示器并翻译\n译文显示在桌面下方 · Ctrl + Alt + H 显示或隐藏字幕";
             sidebarInputHelp.Text = "桌面翻译 · " + settings.Hotkey;
@@ -854,45 +859,78 @@ internal sealed partial class MainForm : Form
         if (pending || active || displayed) SetStatus("第二圈已满，本次翻译已取消，字幕已收起。松开后可重新长按。");
     }
 
+    private static int RuntimeModeIndex(string mode) => mode switch { "SteamVR" => 0, "Desktop" => 1, _ => 2 };
+
+    internal void SetRuntimeMode(string mode)
+    {
+        if (mode is not ("Auto" or "Desktop" or "SteamVR")) throw new ArgumentException("无效的使用模式。");
+        if (settings.RuntimeMode == mode) return;
+        var changed = settings.Copy();
+        changed.RuntimeMode = mode;
+        changed.DesktopMode = mode == "Desktop";
+        if (!demo) SettingsStore.Save(changed);
+        settings = changed;
+        workspaceMode.SelectedIndex = RuntimeModeIndex(mode);
+        ApplyCaptureEnvironment();
+    }
+
     private void ApplyCaptureEnvironment()
     {
-        reconnect.Visible = !settings.DesktopMode;
-        UpdateNavigation();
-        pollTimer.Interval = settings.DesktopMode ? 250 : 16;
-        if (settings.DesktopMode)
+        runtimeMonitor.Refresh();
+        CheckCaptureEnvironment(forceDisplay: true);
+    }
+
+    private void CheckCaptureEnvironment(bool forceDisplay = false)
+    {
+        // Let an in-progress mirror read finish before changing its native resources.
+        if (!captureInProgress)
+            runtimeMonitor.Check(settings.RuntimeMode, Environment.TickCount64);
+        UpdateCaptureEnvironment(forceDisplay);
+    }
+
+    private void UpdateCaptureEnvironment(bool forceDisplay = false)
+    {
+        bool desktop = ActiveDesktopMode;
+        if (displayedDesktop == desktop && !forceDisplay) return;
+        bool switched = displayedDesktop.HasValue && displayedDesktop.Value != desktop;
+        displayedDesktop = desktop;
+        if (switched)
         {
-            reconnectAt = 0;
-            if (vr.IsConnected) vr.Disconnect();
-            vrStatus.Text = "桌面模式 · 主显示器";
+            desktopSubtitle?.Hide();
+            overlayVisible = holdOverlayVisible = false;
+            overlayGestureId = 0;
+            overlayAnchor = null;
+            hideAt = 0;
+            lastHoldBucket = -1;
         }
-        else if (!demo) ConnectVr();
+        pollTimer.Interval = desktop ? 250 : 16;
+        reconnect.Visible = settings.RuntimeMode != "Desktop";
+        vrStatus.Text = desktop ? settings.RuntimeMode switch
+        {
+            "Desktop" => "桌面模式 · 主显示器",
+            "SteamVR" => "桌面模式 · 等待 SteamVR 就绪",
+            _ => "桌面模式 · 自动检测 SteamVR"
+        } : vr.Status;
+        ConfigureVrSelection();
+        UpdateSelectionHelp();
+        UpdateNavigation();
     }
 
     private void ConnectVr()
     {
-        if (settings.DesktopMode) { SetStatus("当前使用桌面模式。在「截图与按键」切换到 SteamVR 模式并保存后即可连接。"); return; }
-        if (busy) { SetStatus("请等待本次翻译完成后再连接 SteamVR。"); return; }
-        reconnectAt = 0; reconnectAttempts = 0; healthyInputSince = 0;
-        CancelSelectionCapture();
-        if (vr.IsConnected) vr.Disconnect();
-        overlayVisible = holdOverlayVisible = false; hideAt = 0; lastHoldBucket = -1;
-        vr.Connect(); ConfigureVrSelection(); vrStatus.Text = vr.Status;
+        if (settings.RuntimeMode == "Desktop") return;
+        // Refresh the passive probe, including when the retry backoff is active.
+        ApplyCaptureEnvironment();
     }
 
     private void Poll()
     {
         if (closing || setupDialogOpen) return;
-        if (settings.DesktopMode)
+        CheckCaptureEnvironment();
+        if (ActiveDesktopMode)
         {
             if (hideAt > 0 && Environment.TickCount64 >= hideAt) HideOverlay();
             return;
-        }
-        try { TryRecoverVrConnection(); }
-        catch (Exception error)
-        {
-            RuntimeFaultLog.Record("reconnect", error);
-            reconnectAt = reconnectAttempts >= 3 ? 0 : Environment.TickCount64 + 2000;
-            SetStatus("SteamVR 恢复暂未完成：" + error.Message);
         }
         bool inputHealthy = VrFrameGuard.PollInput(() =>
         {
@@ -903,15 +941,13 @@ internal sealed partial class MainForm : Form
         {
             RequestCancellation(currentRequest);
             try { vr.Disconnect(); } catch (Exception error) { RuntimeFaultLog.Record("disconnect", error); }
-            healthyInputSince = 0;
-            reconnectAt = reconnectAttempts >= 3 ? 0 : Environment.TickCount64 + 2000;
         }
-        else if (vr.IsConnected)
+        else if (!vr.IsConnected) runtimeMonitor.RuntimeQuit();
+        if (!vr.IsConnected)
         {
-            if (healthyInputSince == 0) healthyInputSince = Environment.TickCount64;
-            if (Environment.TickCount64 - healthyInputSince >= 10000) reconnectAttempts = 0;
+            UpdateCaptureEnvironment();
+            return;
         }
-        if (!vr.IsConnected) { overlayVisible = holdOverlayVisible = false; hideAt = 0; lastHoldBucket = -1; }
         long now = Environment.TickCount64;
         holdFrames.Draw(now, UpdateHoldOverlay, error => ReportVrFault("hold-overlay", error));
         selectionFrames.Draw(now, UpdateSelectionFrame, error => ReportVrFault("selection-overlay", error));
@@ -929,29 +965,6 @@ internal sealed partial class MainForm : Form
 
     private void RequestCancellation(CancellationTokenSource? source) =>
         _ = BackgroundCancellation.RequestAsync(source, demo ? null : error => RuntimeFaultLog.Record("cancel-callback", error));
-
-    private void TryRecoverVrConnection()
-    {
-        if (vr.IsConnected) { reconnectAt = 0; return; }
-        if (reconnectAt == 0 || busy || Environment.TickCount64 < reconnectAt) return;
-        reconnectAttempts++;
-        // Only repair an unexpected failure while SteamVR is still running. Never relaunch it after the user exits.
-        var servers = Process.GetProcessesByName("vrserver");
-        bool running = servers.Length > 0;
-        foreach (var server in servers) server.Dispose();
-        if (!running) { reconnectAt = 0; return; }
-        if (vr.Connect())
-        {
-            reconnectAt = 0; healthyInputSince = 0; ConfigureVrSelection();
-            RuntimeFaultLog.Record("reconnected");
-            SetStatus("SteamVR 已恢复连接，请先松开 X，再重新长按。");
-        }
-        else
-        {
-            reconnectAt = reconnectAttempts >= 3 ? 0 : Environment.TickCount64 + 2000 * reconnectAttempts;
-            SetStatus(reconnectAt == 0 ? vr.Status : "正在恢复 SteamVR 连接…");
-        }
-    }
 
     private void UpdateHoldOverlay()
     {
@@ -977,7 +990,7 @@ internal sealed partial class MainForm : Form
 
     private void ShowStatus(string message)
     {
-        if (settings.DesktopMode)
+        if (ActiveDesktopMode)
         {
             try
             {
@@ -1022,8 +1035,9 @@ internal sealed partial class MainForm : Form
 
     private void ShowPage()
     {
+        QueueWebUpdate();
         if (pages.Count == 0 || selectionActive || selectionCapture is not null) return;
-        if (settings.DesktopMode) { ShowDesktopSubtitle(pages[pageIndex]); return; }
+        if (ActiveDesktopMode) { ShowDesktopSubtitle(pages[pageIndex]); return; }
         if (!vr.IsConnected) return;
         if (pagesAnchor is { } anchor)
         {
@@ -1058,7 +1072,7 @@ internal sealed partial class MainForm : Form
         sourceText.Text = "Welcome to the world!\r\nPress the button to translate what you see.";
         translatedText.Text = "欢迎来到这个世界！\r\n按下按键，即可翻译眼前的文字。\r\n\r\n这是显示测试，没有调用 AI 服务。";
         TryAction(() => SetPages(OverlayRenderer.RenderPages(translatedText.Text)));
-        SetStatus(settings.DesktopMode ? "测试文字已显示在桌面字幕中。" :
+        SetStatus(ActiveDesktopMode ? "测试文字已显示在桌面字幕中。" :
             vr.IsConnected ? "测试文字已发送到 VR 叠层。" : "桌面示例已显示。连接 SteamVR 后可测试头显中的叠层。");
     }
 
@@ -1100,6 +1114,7 @@ internal sealed partial class MainForm : Form
     {
         if (disposedServices) return;
         disposedServices = true;
+        webChanges?.Dispose();
         pollTimer.Dispose(); tray.Dispose(); desktopSubtitle?.Dispose(); vr.Dispose(); ocr.Dispose(); localJapaneseOcr.Dispose(); translator.Dispose();
         selectionFrame?.Dispose(); selectionFrame = null;
         foreach (var page in pages) page.Dispose(); preview.Image?.Dispose();

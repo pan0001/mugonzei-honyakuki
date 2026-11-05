@@ -135,6 +135,7 @@ public sealed class CreditServiceClient : IDisposable
     }
 
     public void ClearLocalSession() => sessions.Remove(ServerUrl);
+    internal void ClearLocalSession(string expectedToken) => sessions.Remove(ServerUrl, expectedToken);
     public Task<CreditAccount> GetAccountAsync(CancellationToken token = default) => SendAsync<CreditAccount>(HttpMethod.Get, "v1/account", null, RequireSession(), token);
     public Task<CreditLedgerEntry[]> GetLedgerAsync(CancellationToken token = default) => SendAsync<CreditLedgerEntry[]>(HttpMethod.Get, "v1/ledger", null, RequireSession(), token);
     public Task<CreditPlan[]> GetPlansAsync(CancellationToken token = default) => SendAsync<CreditPlan[]>(HttpMethod.Get, "v1/plans", null, RequireSession(), token);
