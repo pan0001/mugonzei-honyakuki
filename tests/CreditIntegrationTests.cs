@@ -164,7 +164,7 @@ public static class CreditIntegrationTests
         var initial = new AppSettings { TranslationBackend = "Credits", ProcessingMode = "Handwriting",
             CreditServerUrl = "https://credit-fixture.invalid/", ApiKey = "synthetic-kept-key" };
         AppSettings? saved = null;
-        using (var wizard = new SetupWizardForm(initial, draft => saved = draft))
+        using (var wizard = new SetupWizardForm(initial, draft => saved = draft, firstRun: false, loadSession: _ => null))
         {
             Check(wizard.ReadSettingsDraft().CreditServerUrl == initial.CreditServerUrl, "Wizard restores credit configuration");
             Check(wizard.TryAdvance(), "Credit backend may advance without local login or network access");

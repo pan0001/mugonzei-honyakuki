@@ -571,7 +571,7 @@ internal sealed partial class MainForm : Form
                 var result = await translator.AnalyzeImageAsync(png, settings, token);
                 token.ThrowIfCancellationRequested();
                 translatedText.Text = result;
-                SetPages(RenderResultPages(result, title: "识图结果"), request.GestureId, activeAnchor);
+                await PublishResultPagesAsync(result, request.GestureId, token, title: "识图结果");
                 SetStatus($"识图完成 · {started.Elapsed.TotalSeconds:F1} 秒 · {pages.Count} 页 · 快捷键 {settings.Hotkey}");
                 return;
             }
@@ -612,7 +612,7 @@ internal sealed partial class MainForm : Form
             if (ocrOnly)
             {
                 SetStatus($"{(handwriting ? "手写原文识别" : aiTranscription ? "AI 原文识别" : "本地识别")}完成 · {text.Length} 字符 · {started.Elapsed.TotalSeconds:F1} 秒");
-                SetPages(RenderResultPages(text, title: handwriting ? "手写原文" : "识别原文"), request.GestureId, activeAnchor); return;
+                await PublishResultPagesAsync(text, request.GestureId, token, title: handwriting ? "手写原文" : "识别原文"); return;
             }
             if (settings.TranslationBackend == "Credits")
             {
@@ -633,7 +633,7 @@ internal sealed partial class MainForm : Form
             var translation = await translator.TranslateAsync(text, settings, token);
             token.ThrowIfCancellationRequested();
             translatedText.Text = translation;
-            SetPages(RenderResultPages(translation, settings.ShowSource ? text : null), request.GestureId, activeAnchor);
+            await PublishResultPagesAsync(translation, request.GestureId, token, settings.ShowSource ? text : null);
             SetStatus($"翻译完成 · {started.Elapsed.TotalSeconds:F1} 秒 · {pages.Count} 页 · 快捷键 {settings.Hotkey}");
         }
         catch (Exception ex) { ReportCaptureFailure(ex, token); }
@@ -798,10 +798,6 @@ internal sealed partial class MainForm : Form
     {
         vr.HideSelectionFrame(); selectionFrameVisible = false;
     }
-
-    private List<Bitmap> RenderResultPages(string text, string? source = null, string title = "翻译") => activeAnchor is { } anchor
-        ? SelectionOverlayRenderer.RenderPages(text, anchor.Aspect, source, title)
-        : OverlayRenderer.RenderPages(text, source, title);
 
     internal void ReportCaptureFailure(Exception error, CancellationToken token)
     {

@@ -109,6 +109,8 @@ dotnet Mugonzei.Server.dll codes revoke --id <生成记录的UUID>
 
 真实收款需设置 `MUGONZEI_LIVE_PAYMENTS=true`、服务器专用 `AFDIAN_USER_ID` / `AFDIAN_TOKEN`、批准使用的 `AFDIAN_PAYMENT_BASE_URL` 与各套餐的 `afdianPlanId`。付款地址只接受 `afdian.com`、`ifdian.net`、`afdian.net` 的 HTTPS `/order/create`，禁止用户信息、额外查询串或非默认端口。
 
+真实收款和本机模拟都关闭时，`/v1/plans` 返回空列表，即使管理员已预先配置套餐，也不会在客户端显示可购买方案；创建订单仍返回充值未开放。积分兑换码不受此开关影响。
+
 下单时固化金额、积分、方案及随机 `custom_order_id`，后者只关联发起订单的软件账户，不把凭据放入支付 URL。Webhook 不相信回调里的金额、账号或成功字段；通过服务器签名请求固定 `https://afdian.com/api/open/query-order`，以核实返回的 `status=2`、真实付款金额 `total_amount`、`plan_id` 和 `custom_order_id`。支付订单号唯一约束及同一 SQLite 事务保证重复通知、并发刷新不会重复充值。已付、退款冻结、已退款订单均不会再次入账。
 
 当前刷新每次最多核对最近 3 页，补偿近期漏通知；更老的漏单需要平台重新通知或管理员核对，不应反复创建新订单补发积分。没有自动退款 API，没有从客户端接受金额或余额，也不依赖支付页回跳判定到账。当前版本未实现爱发电 OAuth 身份绑定；充值通过一次性订单标识定向给创建订单的账户。
@@ -118,6 +120,8 @@ dotnet Mugonzei.Server.dll codes revoke --id <生成记录的UUID>
 ## 翻译计费与隐私
 
 管理员通过 `Translation__BaseUrl`、`Translation__ApiKey`、`Translation__Model` 配置 OpenAI 兼容的 Chat Completions 上游。密钥只在服务器；客户端不能指定上游、模型或覆盖提示词。`Translation__TimeoutSeconds`、`Translation__Concurrency`、`Translation__QueueCapacity` 控制预算和队列。未配置时服务可启动，但不接受付费翻译任务。
+
+等待执行的任务使用有界先进先出队列。取消仍在排队的任务会立即移除其截图并释放队列名额，不必等待前面的模型请求结束；正在执行的任务继续按取消与成功结算的事务顺序处理。
 
 每账户和 requestId 绑定内容摘要。相同 ID/相同内容返回原任务，不重新扣分；同 ID/不同内容返回 409。开始执行前原子预留 1 分，成功后扣 1 分；无可读文字、失败或成功之前的取消释放预留。识图/手写采用转写→翻译两个上游阶段，但只按一个成功任务扣费。已完成后取消、隐藏或重复读取结果不退费、不再收费。模型处理成本可能已产生，即使用户后来取消或模型失败，本版仍按上述规则释放积分。
 

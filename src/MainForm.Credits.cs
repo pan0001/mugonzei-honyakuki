@@ -77,8 +77,7 @@ internal sealed partial class MainForm
             throw new InvalidOperationException(string.IsNullOrWhiteSpace(result.Error)
                 ? "积分服务尚未返回有效结果，请到「账号与积分」恢复最近任务。" : result.Error);
         translatedText.Text = result.Translation;
-        SetPages(RenderResultPages(result.Translation, settings.ShowSource ? sourceText.Text : null),
-            request.GestureId, activeAnchor);
+        await PublishResultPagesAsync(result.Translation, request.GestureId, token, settings.ShowSource ? sourceText.Text : null);
         SetStatus($"翻译完成 · 扣除 1 积分 · 余额 {result.Balance} 分 · {started.Elapsed.TotalSeconds:F1} 秒 · {pages.Count} 页");
     }
 }

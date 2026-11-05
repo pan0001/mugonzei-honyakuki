@@ -16,6 +16,8 @@ public static class SetupWizardTests
         {
             try
             {
+                FirstRunRecommendedDefaults();
+                ReopenedServicesKeepSettings();
                 CancelKeepsFirstRun();
                 FailedSaveStaysOpen();
                 SuccessfulSavePreservesAdvancedSettings();
@@ -175,6 +177,75 @@ public static class SetupWizardTests
             "Canceling after advancing a step also leaves first-run setup pending");
     }
 
+    private static void FirstRunRecommendedDefaults()
+    {
+        var original = new AppSettings();
+        var before = original.Copy();
+        AppSettings? saved = null;
+        using var wizard = Create(original, draft => saved = draft);
+        Show(wizard);
+        var draft = wizard.ReadSettingsDraft();
+        Check(draft.TranslationBackend == "Credits" && draft.CreditServerUrl == "https://api.mugonzei.top"
+            && draft.ProcessingMode == "Handwriting", "First run recommends the public account service and AI handwriting recognition");
+        Check(Named<RadioButton>(wizard, "wizardServiceCredits").Checked,
+            "The recommended account card is initially selected");
+        Check(!Named<ComboBox>(wizard, "wizardProcessingMode").Visible
+            && !Named<TextBox>(wizard, "wizardTargetLanguage").Visible,
+            "Service selection does not expose the second step's recognition fields");
+        AssertSettingsEqual(before, original, "First-run recommendations never mutate the caller's settings");
+        Named<TextBox>(wizard, "wizardTargetLanguage").Text = "";
+        Check(wizard.TryAdvance() && wizard.CurrentStep == 1,
+            "The first step does not validate hidden recognition or language fields");
+        Check(!wizard.TryAdvance() && wizard.CurrentStep == 1 && wizard.LastError.Length > 0,
+            "The service step validates the target language before confirmation");
+        Named<TextBox>(wizard, "wizardTargetLanguage").Text = before.TargetLanguage;
+        var account = Named<Button>(wizard, "wizardOpenAccount");
+        Check(account.Visible && account.Enabled && Named<Label>(wizard, "wizardAccountStatus").Visible,
+            "Account access and a local status are available without opening a session or connecting");
+        var advanced = Named<CheckBox>(wizard, "wizardCreditAdvanced");
+        var address = Named<TextBox>(wizard, "wizardCreditServerUrl");
+        Check(!advanced.Checked && !address.Visible, "The recommended public address starts behind advanced settings");
+        advanced.Checked = true;
+        Check(address.Visible && address.Text == "https://api.mugonzei.top", "Advanced settings expose the recommended address");
+        address.Text = "https://staging-credit.invalid";
+        advanced.Checked = false;
+        Check(wizard.ReadSettingsDraft().CreditServerUrl == "https://api.mugonzei.top" && !address.Visible,
+            "Switching off a custom server restores the official account destination");
+        advanced.Checked = true;
+        Check(address.Text == "https://staging-credit.invalid", "Reopening custom server settings restores its unsaved draft");
+        advanced.Checked = false;
+        Check(wizard.TryAdvance(), "Correcting the target language clears the validation failure");
+        wizard.GoBack();
+        SavePreview(wizard, "setup-credits-preview.png");
+        Check(wizard.TryAdvance() && wizard.TryFinish() && saved is not null,
+            "The recommended configuration can be saved without login, network access or VR");
+        Check(saved!.TranslationBackend == "Credits" && saved.CreditServerUrl == draft.CreditServerUrl
+            && saved.ProcessingMode == "Handwriting", "The saved first-run draft retains the recommended destination and mode");
+        AssertSettingsEqual(before, original, "Finishing initial setup leaves the caller's original settings intact");
+    }
+
+    private static void ReopenedServicesKeepSettings()
+    {
+        foreach (string service in new[] { "Credits", "OpenAI", "Codex", "GoogleTranslate" })
+        {
+            var initial = DetailedSettings();
+            initial.TranslationBackend = service;
+            initial.CreditServerUrl = "https://custom-credit-fixture.invalid/service/";
+            if (service == "GoogleTranslate") initial.ProcessingMode = "LocalJapanese";
+            AppSettings? saved = null;
+            using var wizard = Create(initial, draft => saved = draft, firstRun: false);
+            Show(wizard);
+            AssertSettingsEqual(initial, wizard.ReadSettingsDraft(), "Reopening preserves every provider's original settings: " + service);
+            Check(wizard.TryAdvance(), "Reopened settings reach their own service configuration");
+            if (service == "Credits")
+                Check(Named<CheckBox>(wizard, "wizardCreditAdvanced").Checked
+                    && Named<TextBox>(wizard, "wizardCreditServerUrl").Visible,
+                    "An existing custom credit destination is expanded and never silently replaced");
+            Check(wizard.TryAdvance() && wizard.TryFinish() && saved is not null, "Reopened settings can be saved without contacting services");
+            AssertSettingsEqual(initial, saved!, "Saving reopened setup preserves all fields, including hidden credentials: " + service);
+        }
+    }
+
     private static void FailedSaveStaysOpen()
     {
         using var fixture = new SettingsFixture();
@@ -204,7 +275,7 @@ public static class SetupWizardTests
             saves++;
             saved = draft;
             SettingsStore.Save(draft, fixture.Directory);
-        });
+        }, firstRun: false);
         Show(wizard);
         AssertSettingsEqual(original, wizard.ReadSettingsDraft(), "Opening setup preserves advanced fields that the wizard does not expose");
         AdvanceToFinish(wizard);
@@ -278,7 +349,7 @@ public static class SetupWizardTests
                 "The invalid active provider must be rejected before switching: " + invalidField);
             wizard.GoBack();
             Check(wizard.CurrentStep == 0, "Back returns to provider selection after a validation error");
-            Named<ComboBox>(wizard, "wizardBackend").SelectedIndex = startsWithApi ? 0 : 1;
+            Named<RadioButton>(wizard, startsWithApi ? "wizardServiceCodex" : "wizardServiceApi").Checked = true;
             Check(wizard.TryAdvance() && wizard.CurrentStep == 1,
                 "The replacement provider reaches service configuration");
             var expected = original.Copy();
@@ -307,20 +378,32 @@ public static class SetupWizardTests
         int saves = 0;
         using var wizard = Create(new AppSettings(), _ => saves++);
         Show(wizard);
+        CheckServiceCards(wizard);
         SavePreview(wizard, "setup-welcome-preview.png");
-        Named<ComboBox>(wizard, "wizardBackend").SelectedIndex = 2;
-        Named<ComboBox>(wizard, "wizardProcessingMode").SelectedIndex = 1;
-        Check(!wizard.TryAdvance() && wizard.CurrentStep == 0 && wizard.LastError.Length > 0,
-            "An incompatible Google image mode cannot advance the wizard");
+        wizard.Size = wizard.MinimumSize;
+        CheckServiceCards(wizard);
+        SavePreview(wizard, "setup-welcome-small-preview.png");
+        wizard.Size = new Size(940, 800);
+        Named<RadioButton>(wizard, "wizardServiceGoogle").Checked = true;
+        Check(wizard.ReadSettingsDraft().ProcessingMode == "Ocr", "Choosing Google replaces an incompatible AI mode with local OCR");
+        Check(wizard.TryAdvance() && wizard.CurrentStep == 1, "Google reaches recognition options on the service step");
+        foreach (int invalidMode in new[] { 1, 2 })
+        {
+            Named<ComboBox>(wizard, "wizardProcessingMode").SelectedIndex = invalidMode;
+            Check(!wizard.TryAdvance() && wizard.CurrentStep == 1 && wizard.LastError.Length > 0,
+                "Manually selecting an AI image mode cannot pass Google service setup");
+        }
         Named<ComboBox>(wizard, "wizardProcessingMode").SelectedIndex = 0;
-        Named<ComboBox>(wizard, "wizardBackend").SelectedIndex = 0;
+        SavePreview(wizard, "setup-google-preview.png");
+        wizard.GoBack();
+        Named<RadioButton>(wizard, "wizardServiceCodex").Checked = true;
         Check(wizard.TryAdvance() && wizard.CurrentStep == 1, "Valid provider/mode settings reach service setup");
         SavePreview(wizard, "setup-codex-preview.png");
         Check(wizard.TryAdvance() && wizard.CurrentStep == 2, "Codex auto-detection requires no model call to advance");
         SavePreview(wizard, "setup-confirm-preview.png");
         wizard.CancelSetup();
 
-        using var api = Create(DetailedSettings(), _ => saves++);
+        using var api = Create(DetailedSettings(), _ => saves++, firstRun: false);
         Show(api);
         Check(api.TryAdvance() && api.CurrentStep == 1, "Configured API settings reach the service step");
         var key = Named<TextBox>(api, "wizardApiKey");
@@ -329,11 +412,42 @@ public static class SetupWizardTests
         Check(!api.TryAdvance() && api.CurrentStep == 1 && api.LastError.Length > 0,
             "An empty API model cannot pass service setup");
         Named<TextBox>(api, "wizardApiModel").Text = "fixture-vision-model";
+        Check(api.TryAdvance(), "A corrected API model can pass service setup");
+        api.GoBack();
         SavePreview(api, "setup-api-preview.png");
         if (api.MinimumSize.Width > 0 && api.MinimumSize.Height > 0) api.Size = api.MinimumSize;
         SavePreview(api, "setup-api-small-preview.png");
         api.CancelSetup();
         Check(saves == 0, "Navigation and validation never persist settings or call services");
+    }
+
+    private static void CheckServiceCards(SetupWizardForm wizard)
+    {
+        string[] names = ["wizardServiceCredits", "wizardServiceApi", "wizardServiceCodex", "wizardServiceGoogle"];
+        string[] labels = ["账号积分服务（推荐）", "使用自己的 API 服务", "连接本机 Codex", "本地 OCR + Google 翻译"];
+        var cards = names.Select(name => Named<RadioButton>(wizard, name)).ToArray();
+        var selected = cards.Single(card => card.Checked);
+        var mode = Named<ComboBox>(wizard, "wizardProcessingMode");
+        int previousMode = mode.SelectedIndex;
+        Check(!Descendants(wizard).Any(control => control.Name == "wizardBackend"), "Service cards replace the legacy provider dropdown");
+        Check(cards.Select(card => card.Text).SequenceEqual(labels), "The four service cards use the intended order and labels");
+        var viewport = Named<Panel>(wizard, "wizardViewport");
+        wizard.PerformLayout(); Application.DoEvents();
+        var positions = cards.Select(card => card.RectangleToScreen(card.ClientRectangle).Top).ToArray();
+        Check(positions.Zip(positions.Skip(1)).All(pair => pair.First < pair.Second), "Service cards are visually ordered from account credits to Google");
+        var footer = Named<Button>(wizard, "wizardNext").RectangleToScreen(Named<Button>(wizard, "wizardNext").ClientRectangle);
+        foreach (var card in cards)
+        {
+            viewport.ScrollControlIntoView(card); Application.DoEvents();
+            Rectangle bounds = viewport.RectangleToClient(card.RectangleToScreen(card.ClientRectangle));
+            Check(card.Visible && card.Enabled && card.CanSelect && card.Focus(), "Every service card is keyboard-focusable");
+            Check(viewport.ClientRectangle.Contains(bounds), "Every service card can be scrolled completely into view at the minimum window size");
+            Check(card.RectangleToScreen(card.ClientRectangle).Bottom <= footer.Top, "The footer never covers a service card");
+        }
+        selected.Checked = true;
+        selected.Focus();
+        mode.SelectedIndex = previousMode;
+        viewport.AutoScrollPosition = Point.Empty;
     }
 
     private static void MainFormModalGuards()
@@ -427,7 +541,7 @@ public static class SetupWizardTests
         (target.GetType().GetMethod(name, BindingFlags.Instance | BindingFlags.NonPublic)
             ?? throw new MissingMethodException(target.GetType().Name, name)).Invoke(target, arguments);
 
-    private static SetupWizardForm Create(AppSettings initial, Action<AppSettings> save, bool firstRun = true) => new(initial, save, firstRun)
+    private static SetupWizardForm Create(AppSettings initial, Action<AppSettings> save, bool firstRun = true) => new(initial, save, firstRun, loadSession: _ => null)
     {
         StartPosition = FormStartPosition.Manual,
         Location = new Point(-20000, -20000),

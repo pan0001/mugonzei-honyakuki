@@ -13,6 +13,11 @@ if (args.Length == 2 && args[0] == "--fake-local-ocr")
 
 try
 {
+    if (args.Contains("--desktop-responsiveness-regression"))
+    {
+        await DesktopResponsivenessTests.RunAsync();
+        return;
+    }
     if (args.Length == 3 && args[0] == "--credits-e2e")
     {
         await CreditIntegrationTests.RunEndToEndAsync(args[1], args[2]);
@@ -53,6 +58,7 @@ try
     SetupWizardTests.Run();
     await CreditServiceTests.RunAsync();
     CreditIntegrationTests.Run();
+    await DesktopResponsivenessTests.RunAsync();
     LongPressTests.Run();
     CaptureRequestTests.Run();
     GestureCancelTests.Run();

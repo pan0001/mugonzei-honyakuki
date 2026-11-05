@@ -16,6 +16,7 @@ public sealed class CreditAccountForm : Form
         Dock = DockStyle.Fill, BackColor = UiTheme.Input, ForeColor = UiTheme.Ink, BorderStyle = BorderStyle.None };
     private readonly List<Button> actionButtons = [];
     private readonly CancellationTokenSource lifetime = new();
+    private Task? lifetimeCancellation;
     private CreditServiceClient? client;
     private bool working, closing, resourcesDisposed;
     private Guid? pendingOrderRequest;
@@ -39,7 +40,7 @@ public sealed class CreditAccountForm : Form
         redemptionCode.PlaceholderText = "MU- 后接 8 组四位字符；粘贴运营者提供的兑换码";
         redemptionCode.MaxLength = 128; redemptionCode.UseSystemPasswordChar = true;
         BuildUi();
-        FormClosing += (_, _) => { closing = true; lifetime.Cancel(); };
+        FormClosing += (_, _) => { closing = true; _ = CancelLifetimeAsync(); };
     }
 
     private void BuildUi()
@@ -114,7 +115,7 @@ public sealed class CreditAccountForm : Form
         actions.Controls.Add(ActionButton("购买所选次数包", Purchase, primary: true));
         actions.Controls.Add(ActionButton("打开所选订单支付页", OpenSelectedPayment));
         actions.Controls.Add(ActionButton("刷新所选订单", RefreshSelectedOrder));
-        actions.Controls.Add(ActionButton("刷新订单列表", RefreshAll));
+        actions.Controls.Add(ActionButton("刷新订单列表", RefreshOrders));
         layout.Controls.Add(actions, 0, 2);
         layout.Controls.Add(Note("支付页打开或返回客户端不表示到账。请刷新订单，到账以服务端确认后的积分余额为准。"), 0, 3);
         layout.Controls.Add(orders, 0, 4);
@@ -181,26 +182,65 @@ public sealed class CreditAccountForm : Form
     {
         var service = EnsureClient();
         var session = service.Session;
-        var accountTask = service.GetAccountAsync(lifetime.Token);
-        var ledgerTask = service.GetLedgerAsync(lifetime.Token);
-        var plansTask = service.GetPlansAsync(lifetime.Token);
-        var ordersTask = service.GetOrdersAsync(lifetime.Token);
-        await Task.WhenAll(accountTask, ledgerTask, plansTask, ordersTask);
+        // Each response updates only its own view. A slow or failed plans/order
+        // request must not hide an account balance that has already arrived.
+        await Task.WhenAll(RefreshBalance(service, session), RefreshLedger(service, session),
+            RefreshPlans(service, session), RefreshOrders(service, session));
+        if (IsCurrentSession(service, session)) status.Text = "账户已刷新。";
+    }
+
+    private async Task RefreshBalanceAndLedger(CreditServiceClient service, CreditSession? session) =>
+        await Task.WhenAll(RefreshBalance(service, session), RefreshLedger(service, session));
+
+    private async Task RefreshBalance(CreditServiceClient service, CreditSession? session)
+    {
+        var account = await service.GetAccountAsync(lifetime.Token);
         if (!IsCurrentSession(service, session)) return;
-        var account = await accountTask;
         balance.Text = $"账户：{account.Username}    总余额：{account.Balance}    预留：{account.Reserved}    可用：{Math.Max(0, account.Balance - account.Reserved)} 积分";
-        ledger.BeginUpdate(); ledger.Items.Clear();
-        foreach (var row in (await ledgerTask).Take(1000)) ledger.Items.Add(new ListViewItem([
-            row.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss"), row.Kind == "redemption" ? "兑换码入账" : row.Kind,
-            row.Amount.ToString("+0;-0;0"), row.Balance.ToString(), row.Reference]));
-        ledger.EndUpdate();
+    }
+
+    private async Task RefreshLedger(CreditServiceClient service, CreditSession? session)
+    {
+        var rows = await service.GetLedgerAsync(lifetime.Token);
+        if (!IsCurrentSession(service, session)) return;
+        ledger.BeginUpdate();
+        try
+        {
+            ledger.Items.Clear();
+            foreach (var row in rows.Take(1000)) ledger.Items.Add(new ListViewItem([
+                row.CreatedAt.ToLocalTime().ToString("MM-dd HH:mm:ss"), row.Kind == "redemption" ? "兑换码入账" : row.Kind,
+                row.Amount.ToString("+0;-0;0"), row.Balance.ToString(), row.Reference]));
+        }
+        finally { ledger.EndUpdate(); }
+    }
+
+    private async Task RefreshPlans(CreditServiceClient service, CreditSession? session)
+    {
+        var rows = await service.GetPlansAsync(lifetime.Token);
+        if (!IsCurrentSession(service, session)) return;
         string? selected = (plans.SelectedItem as CreditPlan)?.Id;
-        plans.Items.Clear();
-        foreach (var plan in (await plansTask).Take(100)) plans.Items.Add(plan);
-        plans.SelectedIndex = plans.Items.Cast<CreditPlan>().Select((p, index) => (p, index)).FirstOrDefault(x => x.p.Id == selected, (null!, -1)).index;
-        if (plans.SelectedIndex < 0 && plans.Items.Count > 0) plans.SelectedIndex = 0;
-        PopulateOrders(await ordersTask);
-        status.Text = "账户已刷新。";
+        plans.BeginUpdate();
+        try
+        {
+            plans.Items.Clear();
+            foreach (var plan in rows.Take(100)) plans.Items.Add(plan);
+            plans.SelectedIndex = plans.Items.Cast<CreditPlan>().Select((p, index) => (p, index)).FirstOrDefault(x => x.p.Id == selected, (null!, -1)).index;
+            if (plans.SelectedIndex < 0 && plans.Items.Count > 0) plans.SelectedIndex = 0;
+        }
+        finally { plans.EndUpdate(); }
+    }
+
+    private async Task RefreshOrders(CreditServiceClient service, CreditSession? session)
+    {
+        var rows = await service.GetOrdersAsync(lifetime.Token);
+        if (IsCurrentSession(service, session)) PopulateOrders(rows);
+    }
+
+    private async Task RefreshOrders()
+    {
+        var service = EnsureClient(); var session = service.Session;
+        await RefreshOrders(service, session);
+        if (IsCurrentSession(service, session)) status.Text = "订单列表已刷新。";
     }
 
     private bool IsCurrentSession(CreditServiceClient service, CreditSession? session) => !closing
@@ -217,7 +257,7 @@ public sealed class CreditAccountForm : Form
         if (!IsCurrentSession(service, session)) return;
         balance.Text = $"账户：{session!.Username}    总余额：{result.Balance}    预留：{result.Reserved}    可用：{result.Balance - result.Reserved} 积分";
         string confirmation = result.AlreadyRedeemed ? "此兑换码已入账到当前账户，本次未重复增加积分。" : $"兑换成功，已增加 {result.Credits} 积分。";
-        try { await RefreshAll(); }
+        try { await RefreshBalanceAndLedger(service, session); }
         catch (Exception) when (!closing && !lifetime.IsCancellationRequested)
         {
             if (IsCurrentSession(service, session)) status.Text = confirmation + " 列表刷新未完成，请稍后刷新。";
@@ -251,10 +291,12 @@ public sealed class CreditAccountForm : Form
     private async Task RefreshSelectedOrder()
     {
         var selected = SelectedOrder();
-        var updated = await EnsureClient().GetOrderAsync(selected.Id, refresh: true, lifetime.Token);
-        if (closing) return;
-        UpsertOrder(updated); await RefreshAll();
-        if (!closing) status.Text = "订单状态：" + updated.Status + "。余额已刷新。";
+        var service = EnsureClient(); var session = service.Session;
+        var updated = await service.GetOrderAsync(selected.Id, refresh: true, lifetime.Token);
+        if (!IsCurrentSession(service, session)) return;
+        UpsertOrder(updated);
+        await RefreshBalanceAndLedger(service, session);
+        if (IsCurrentSession(service, session)) status.Text = "订单状态：" + updated.Status + "。余额已刷新。";
     }
 
     private CreditOrder SelectedOrder() => orders.SelectedItems.Count > 0 && orders.SelectedItems[0].Tag is CreditOrder order
@@ -262,9 +304,13 @@ public sealed class CreditAccountForm : Form
     private void PopulateOrders(IEnumerable<CreditOrder> rows)
     {
         string? selected = orders.SelectedItems.Count > 0 ? (orders.SelectedItems[0].Tag as CreditOrder)?.Id : null;
-        orders.BeginUpdate(); orders.Items.Clear();
-        foreach (var order in rows.Take(1000)) { var item = OrderItem(order); item.Selected = order.Id == selected; orders.Items.Add(item); }
-        orders.EndUpdate();
+        orders.BeginUpdate();
+        try
+        {
+            orders.Items.Clear();
+            foreach (var order in rows.Take(1000)) { var item = OrderItem(order); item.Selected = order.Id == selected; orders.Items.Add(item); }
+        }
+        finally { orders.EndUpdate(); }
     }
     private void UpsertOrder(CreditOrder order)
     {
@@ -318,8 +364,22 @@ public sealed class CreditAccountForm : Form
 
     protected override void Dispose(bool disposing)
     {
-        if (disposing && !resourcesDisposed) { resourcesDisposed = true; closing = true; lifetime.Cancel(); client?.Dispose(); lifetime.Dispose(); }
+        if (disposing && !resourcesDisposed)
+        {
+            resourcesDisposed = true; closing = true;
+            var pendingCancellation = CancelLifetimeAsync();
+            var ownedClient = client; client = null;
+            _ = DisposeAfterCancellation(pendingCancellation, ownedClient, lifetime);
+        }
         base.Dispose(disposing);
+    }
+    private Task CancelLifetimeAsync() => lifetimeCancellation ??= BackgroundCancellation.RequestAsync(lifetime);
+    private static async Task DisposeAfterCancellation(Task cancellation, CreditServiceClient? client, CancellationTokenSource source)
+    {
+        await cancellation.ConfigureAwait(false);
+        try { client?.Dispose(); }
+        catch (Exception error) { RuntimeFaultLog.Record("credit-client-dispose", error); }
+        finally { source.Dispose(); }
     }
     private static TextBox Input(string name) => new() { Name = name, Dock = DockStyle.Fill, BorderStyle = BorderStyle.None, BackColor = UiTheme.Input, ForeColor = UiTheme.Ink };
     private static Label Note(string text) => new() { Text = text, AutoSize = true, ForeColor = UiTheme.Muted, UseMnemonic = false, MaximumSize = new Size(860, 0), Margin = new Padding(0, 6, 0, 10) };

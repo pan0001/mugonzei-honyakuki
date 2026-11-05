@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
-using System.Threading.Channels;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace Mugonzei.Server;
@@ -11,7 +10,12 @@ public sealed class TranslationService : BackgroundService
     private readonly Store store;
     private readonly ITranslationProcessor processor;
     private readonly TranslationOptions options;
-    private readonly Channel<Pending> queue;
+    private readonly object queueGate = new();
+    private readonly LinkedList<Pending> queue = new();
+    private readonly Dictionary<(string UserId, string Id), LinkedListNode<Pending>> queued = new();
+    private readonly SemaphoreSlim queueReady = new(0);
+    private readonly int queueCapacity;
+    private bool accepting = true;
     private readonly ConcurrentDictionary<(string UserId, string Id), CancellationTokenSource> active = new();
     private readonly ILogger<TranslationService> logger;
 
@@ -21,8 +25,7 @@ public sealed class TranslationService : BackgroundService
         this.processor = processor;
         this.options = options;
         this.logger = logger;
-        queue = Channel.CreateBounded<Pending>(new BoundedChannelOptions(Math.Clamp(options.QueueCapacity, 1, 64))
-        { FullMode = BoundedChannelFullMode.Wait, SingleWriter = false, SingleReader = options.Concurrency <= 1 });
+        queueCapacity = Math.Clamp(options.QueueCapacity, 1, 64);
     }
 
     public TranslationTaskDto Submit(string userId, Guid id, TranslationInput input)
@@ -39,9 +42,19 @@ public sealed class TranslationService : BackgroundService
         if (!processor.IsAvailable) throw new ApiException(503, "service_unavailable", "官方翻译服务尚未配置，请稍后再试。");
         var reservation = store.ReserveTranslation(userId, key, hash, input.PersistenceJson());
         if (!reservation.Created) return TranslationTaskDto.From(reservation.Job);
-        if (!queue.Writer.TryWrite(new(userId, key, input)))
-            return TranslationTaskDto.From(store.FailTranslation(userId, key, "failed", "queue_full"));
-        return TranslationTaskDto.From(reservation.Job);
+        lock (queueGate)
+        {
+            // Cancellation may commit between reservation and insertion. Read
+            // while holding the queue gate so a completed cancellation cannot
+            // leave a screenshot or capacity reservation behind in this queue.
+            var job = store.GetTranslation(userId, key);
+            if (job.Status != "queued") return TranslationTaskDto.From(job);
+            if (!accepting || queue.Count >= queueCapacity)
+                return TranslationTaskDto.From(store.FailTranslation(userId, key, "failed", accepting ? "queue_full" : "server_stopped"));
+            queued.Add((userId, key), queue.AddLast(new Pending(userId, key, input)));
+            queueReady.Release();
+            return TranslationTaskDto.From(job);
+        }
     }
 
     public TranslationTaskDto Get(string userId, Guid id) => TranslationTaskDto.From(store.GetTranslation(userId, id.ToString("D")));
@@ -51,6 +64,19 @@ public sealed class TranslationService : BackgroundService
         string key = id.ToString("D");
         // The transaction decides the winner. Cancelling a completed job never refunds it.
         var job = store.CancelTranslation(userId, key);
+        if (job.Status == "cancelled")
+        {
+            lock (queueGate)
+            {
+                if (queued.Remove((userId, key), out var node))
+                {
+                    queue.Remove(node);
+                    // A worker may already own this signal. It will skip the
+                    // empty queue; otherwise consume the now-unused signal.
+                    queueReady.Wait(0);
+                }
+            }
+        }
         if (job.Status == "cancelled" && active.TryGetValue((userId, key), out var cancellation))
         {
             try { cancellation.Cancel(); }
@@ -75,8 +101,17 @@ public sealed class TranslationService : BackgroundService
     {
         try
         {
-            await foreach (var pending in queue.Reader.ReadAllAsync(stoppingToken))
+            while (true)
             {
+                await queueReady.WaitAsync(stoppingToken);
+                Pending pending;
+                lock (queueGate)
+                {
+                    if (queue.First is not { } node) continue;
+                    pending = node.Value;
+                    queue.RemoveFirst();
+                    queued.Remove((pending.UserId, pending.Id));
+                }
                 using var cancellation = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
                 var key = (pending.UserId, pending.Id);
                 if (!active.TryAdd(key, cancellation)) continue;
@@ -113,11 +148,16 @@ public sealed class TranslationService : BackgroundService
 
     public override async Task StopAsync(CancellationToken cancellationToken)
     {
-        queue.Writer.TryComplete();
+        lock (queueGate) accepting = false;
         await base.StopAsync(cancellationToken);
         store.RecoverTranslations();
         // Release queued screenshots even if this service object remains referenced after shutdown.
-        while (queue.Reader.TryRead(out _)) { }
+        lock (queueGate)
+        {
+            queue.Clear();
+            queued.Clear();
+            while (queueReady.Wait(0)) { }
+        }
     }
 }
 

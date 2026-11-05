@@ -27,6 +27,9 @@ internal static partial class Program
             AuthenticationPersistence();
             await ReservationsAndRecovery();
             await WorkerLifecycle();
+            await QueuedCancellationReleasesCapacity();
+            await QueueWorkersAndShutdown();
+            await QueueSubmissionCancellationRaces();
             await CancellationBeforeSubmission();
             await CancellationRaces();
             await ProcessorTransport();

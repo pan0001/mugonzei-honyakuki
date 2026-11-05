@@ -1,11 +1,12 @@
 namespace SteamVrTranslator;
 
-/// <summary>A local, staged editor. It never connects to services and saves only through its supplied callback.</summary>
+/// <summary>A staged settings editor. Account access is explicit; opening or saving never calls a model.</summary>
 internal sealed class SetupWizardForm : Form
 {
     private readonly AppSettings initial;
     private readonly Action<AppSettings> saveSettings;
     private readonly bool firstRun;
+    private readonly Func<string, CreditSession?> loadSession;
     private readonly Panel viewport = new() { Name = "wizardViewport", Dock = DockStyle.Fill, AutoScroll = true, Padding = new Padding(0, 0, 8, 0) };
     private readonly Label errorLabel = Note("", "wizardError");
     private readonly Label pageTitle = Note("", "wizardPageTitle");
@@ -19,7 +20,14 @@ internal sealed class SetupWizardForm : Form
     private readonly UiButton nextButton = Button("下一步", "wizardNext", true);
     private readonly UiButton backButton = Button("返回", "wizardBack");
     private readonly UiButton cancelButton = Button("取消", "wizardCancel");
-    private readonly ComboBox backend = Combo("wizardBackend");
+    internal const string OfficialCreditServerUrl = "https://api.mugonzei.top";
+    private readonly SetupServiceChoice[] serviceChoices =
+    [
+        new() { Name = "wizardServiceCredits", Number = "01", Text = "账号积分服务（推荐）", Description = "登录一个账号即可开始 · 完整翻译成功扣 1 积分" },
+        new() { Name = "wizardServiceApi", Number = "02", Text = "使用自己的 API 服务", Description = "填写地址、模型与密钥 · 支持云端和本机接口" },
+        new() { Name = "wizardServiceCodex", Number = "03", Text = "连接本机 Codex", Description = "连接本机已登录的 Codex · 使用现有账号" },
+        new() { Name = "wizardServiceGoogle", Number = "04", Text = "本地 OCR + Google 翻译", Description = "在电脑上识别文字，再交给 Google 翻译 · 无需 API 密钥" }
+    ];
     private readonly ComboBox processingMode = Combo("wizardProcessingMode");
     private readonly TextBox targetLanguage = Input("wizardTargetLanguage");
     private readonly TextBox codexPath = Input("wizardCodexPath");
@@ -31,6 +39,11 @@ internal sealed class SetupWizardForm : Form
     private readonly TextBox apiModel = Input("wizardApiModel");
     private readonly TextBox apiKey = Input("wizardApiKey");
     private readonly TextBox creditServer = Input("wizardCreditServerUrl");
+    private readonly CheckBox creditAdvanced = Check("使用其他积分服务器", "wizardCreditAdvanced");
+    private readonly UiButton openAccount = Button("登录 / 注册 / 兑换积分", "wizardOpenAccount", true);
+    private readonly Label accountStatus = Note("", "wizardAccountStatus");
+    private readonly Label creditDestination = Note("", "wizardCreditDestination");
+    private UiCard creditAddressCard = null!;
     private readonly ComboBox apiImageDetail = Combo("wizardApiImageDetail");
     private readonly CheckBox apiStream = Check("使用流式接口（部分模型需要）", "wizardApiStream");
     private readonly ComboBox captureMode = Combo("wizardCaptureMode");
@@ -39,17 +52,27 @@ internal sealed class SetupWizardForm : Form
     private UiCard codexCard = null!, apiCard = null!, googleCard = null!, creditCard = null!;
     private string credentialAddress = "";
     private bool loading = true, finishing;
+    private int? modeBeforeGoogle;
+    private string customServerDraft = "";
 
     internal int CurrentStep { get; private set; }
     internal string LastError => errorLabel.Text;
 
-    public SetupWizardForm(AppSettings initialSettings, Action<AppSettings> saveSettings, bool firstRun = true)
+    public SetupWizardForm(AppSettings initialSettings, Action<AppSettings> saveSettings, bool firstRun = true,
+        Func<string, CreditSession?>? loadSession = null)
     {
         ArgumentNullException.ThrowIfNull(initialSettings);
         ArgumentNullException.ThrowIfNull(saveSettings);
         initial = initialSettings.Copy();
+        if (firstRun)
+        {
+            initial.TranslationBackend = "Credits";
+            initial.CreditServerUrl = OfficialCreditServerUrl;
+            initial.ProcessingMode = "Handwriting";
+        }
         this.saveSettings = saveSettings;
         this.firstRun = firstRun;
+        this.loadSession = loadSession ?? (url => new CreditSessionStore().Load(url));
 
         Text = firstRun ? "无言势翻译器 · 初次设置" : "无言势翻译器 · 重新配置";
         AutoScaleDimensions = new SizeF(96, 96);
@@ -57,8 +80,8 @@ internal sealed class SetupWizardForm : Form
         Font = new Font("Microsoft YaHei UI", 10f);
         BackColor = UiTheme.Background;
         ForeColor = UiTheme.Ink;
-        MinimumSize = new Size(800, 640);
-        Size = new Size(940, 800);
+        MinimumSize = new Size(820, 640);
+        Size = new Size(1040, 820);
         StartPosition = firstRun ? FormStartPosition.CenterScreen : FormStartPosition.CenterParent;
         ShowInTaskbar = firstRun;
         MinimizeBox = false;
@@ -73,8 +96,23 @@ internal sealed class SetupWizardForm : Form
         RefreshServiceChoices();
         ShowStep(0);
 
-        backend.SelectedIndexChanged += (_, _) => { if (!loading) RefreshServiceChoices(); };
+        foreach (var choice in serviceChoices)
+            choice.CheckedChanged += (_, _) => { if (!loading && choice.Checked) ServiceChanged(); };
         processingMode.SelectedIndexChanged += (_, _) => { if (!loading) RefreshServiceChoices(); };
+        creditAdvanced.CheckedChanged += (_, _) =>
+        {
+            if (!creditAdvanced.Checked)
+            {
+                customServerDraft = creditServer.Text;
+                creditServer.Text = OfficialCreditServerUrl;
+            }
+            else if (creditServer.Text.TrimEnd('/') == OfficialCreditServerUrl && customServerDraft.Length > 0)
+                creditServer.Text = customServerDraft;
+            creditAddressCard.Visible = SelectedBackend == "Credits" && creditAdvanced.Checked;
+            RefreshAccountStatus();
+        };
+        openAccount.Click += (_, _) => OpenAccount();
+        creditServer.Leave += (_, _) => RefreshAccountStatus();
         apiPreset.SelectedIndexChanged += (_, _) =>
         {
             if (apiPreset.SelectedIndex >= 0) providerNote.Text = ApiProviderPresets.All[apiPreset.SelectedIndex].Note;
@@ -136,8 +174,7 @@ internal sealed class SetupWizardForm : Form
         ClearError();
         try
         {
-            ValidateChoice();
-            if (CurrentStep == 1) ValidateService();
+            if (CurrentStep == 1) { ValidateChoice(); ValidateService(); }
             ShowStep(CurrentStep + 1);
             return true;
         }
@@ -200,7 +237,8 @@ internal sealed class SetupWizardForm : Form
         ClearError();
     }
 
-    private string SelectedBackend => backend.SelectedIndex switch { 1 => "OpenAI", 2 => "GoogleTranslate", 3 => "Credits", _ => "Codex" };
+    private string SelectedBackend => serviceChoices[1].Checked ? "OpenAI" : serviceChoices[2].Checked ? "Codex"
+        : serviceChoices[3].Checked ? "GoogleTranslate" : "Credits";
     private string SelectedMode => processingMode.SelectedIndex switch { 1 => "Image", 2 => "Handwriting", 3 => "LocalJapanese", _ => "Ocr" };
 
     private void ValidateChoice()
@@ -237,7 +275,6 @@ internal sealed class SetupWizardForm : Form
 
     private void InitializeChoices()
     {
-        backend.Items.AddRange(["本机 Codex", "其他 AI API（云端 / 本机）", "Google Translate（后台网页）", "积分服务（爱发电）"]);
         processingMode.Items.AddRange(["本地OCR（不推荐）", "直接发送截图给模型", "手写体 OCR（AI）→ 翻译", "本地日语手写 OCR → 翻译"]);
         codexReasoning.Items.AddRange(["自动（按阶段）", "low", "medium", "high"]);
         apiPreset.Items.AddRange(ApiProviderPresets.All.Select(preset => (object)preset.Name).ToArray());
@@ -256,8 +293,10 @@ internal sealed class SetupWizardForm : Form
 
     private void LoadInitialValues()
     {
-        backend.SelectedIndex = initial.TranslationBackend switch { "OpenAI" => 1, "GoogleTranslate" => 2, "Credits" => 3, _ => 0 };
+        serviceChoices[initial.TranslationBackend switch { "OpenAI" => 1, "Codex" => 2, "GoogleTranslate" => 3, _ => 0 }].Checked = true;
         creditServer.Text = initial.CreditServerUrl;
+        creditAdvanced.Checked = initial.CreditServerUrl.TrimEnd('/') != OfficialCreditServerUrl;
+        creditAddressCard.Visible = creditAdvanced.Checked;
         processingMode.SelectedIndex = initial.ProcessingMode switch { "Image" => 1, "Handwriting" => 2, "LocalJapanese" => 3, _ => 0 };
         targetLanguage.Text = initial.TargetLanguage;
         codexPath.Text = initial.CodexExecutablePath;
@@ -273,80 +312,107 @@ internal sealed class SetupWizardForm : Form
         hotkey.Text = initial.Hotkey;
         controller.Checked = initial.ControllerEnabled;
         providerNote.Text = ApiProviderPresets.All[0].Note;
+        RefreshAccountStatus();
     }
 
     private void BuildShell()
     {
-        var shell = new TableLayoutPanel
+        var frame = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 2, RowCount = 1,
+            Padding = new Padding(18), Margin = Padding.Empty };
+        frame.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 206));
+        frame.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        frame.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        Controls.Add(frame);
+        var sidebar = new UiCard { Dock = DockStyle.Fill, HeaderHeight = 0, BackColor = UiTheme.Sidebar,
+            Padding = new Padding(20, 22, 20, 20), Margin = new Padding(0, 0, 18, 0) };
+        frame.Controls.Add(sidebar, 0, 0);
+        var rail = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5, Margin = Padding.Empty };
+        rail.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        rail.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        rail.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        rail.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        rail.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        rail.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        sidebar.Controls.Add(rail);
+        frame.SizeChanged += (_, _) =>
         {
-            Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 5,
-            Padding = new Padding(26, 22, 26, 20), Margin = Padding.Empty
+            int width = frame.ClientSize.Width < LogicalToDeviceUnits(860) ? 0 : LogicalToDeviceUnits(206);
+            if (Math.Abs(frame.ColumnStyles[0].Width - width) < .5f) return;
+            frame.SuspendLayout();
+            frame.ColumnStyles[0].Width = width; sidebar.Visible = width > 0;
+            frame.ResumeLayout(true);
         };
-        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
-        shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
-        Controls.Add(shell);
-
-        var header = Stack();
-        var eyebrow = Note("M U G O N Z E I  /  S E T U P", "wizardBrand");
-        eyebrow.ForeColor = UiTheme.Accent;
-        eyebrow.Font = new Font(Font.FontFamily, 8.5f, FontStyle.Bold);
-        var title = Note(firstRun ? "先选好你的翻译方式" : "重新配置，继续交流", "wizardHeading");
-        title.ForeColor = UiTheme.Ink;
-        title.Font = new Font(Font.FontFamily, 23f, FontStyle.Bold);
-        pageTitle.Margin = new Padding(0, 3, 0, 14);
-        Add(header, eyebrow); Add(header, title); Add(header, pageTitle);
-        shell.Controls.Add(header, 0, 0);
-
-        var progress = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 3, Margin = new Padding(0, 0, 8, 18) };
-        string[] labels = ["01  选择方式", "02  配置服务", "03  截图与开始"];
+        var brand = Note("M U G O N Z E I", "wizardBrand");
+        brand.ForeColor = UiTheme.Accent; brand.Font = new Font(Font.FontFamily, 8f, FontStyle.Bold);
+        brand.Margin = new Padding(0, 0, 0, 14); rail.Controls.Add(brand, 0, 0);
+        var heading = Note("无言势\n翻译器", "wizardHeading");
+        heading.Font = new Font(Font.FontFamily, 24f, FontStyle.Bold); heading.ForeColor = UiTheme.Ink;
+        heading.Margin = new Padding(0, 0, 0, 34); rail.Controls.Add(heading, 0, 1);
+        var steps = Stack();
+        string[] labels = ["01  选择服务\n      选一种适合你的方式", "02  连接与识图\n      准备账号或服务", "03  截图与开始\n      确认后进入工作台"];
         for (int index = 0; index < labels.Length; index++)
         {
-            progress.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f / 3));
-            var label = new Label { Text = labels[index], AutoSize = true, Dock = DockStyle.Fill,
-                Font = new Font(Font.FontFamily, 10f, FontStyle.Bold), Padding = new Padding(12, 11, 8, 11),
-                Margin = new Padding(0, 0, index == 2 ? 0 : 8, 0), TextAlign = ContentAlignment.MiddleLeft };
-            stepLabels[index] = label; progress.Controls.Add(label, index, 0);
+            var label = Note(labels[index], "wizardStep" + index);
+            label.Padding = new Padding(10, 14, 4, 14); label.Margin = new Padding(0, 0, 0, 10);
+            label.Font = new Font(Font.FontFamily, 8.5f); stepLabels[index] = label; Add(steps, label);
         }
-        shell.Controls.Add(progress, 0, 1);
-        shell.Controls.Add(viewport, 0, 2);
-        errorLabel.ForeColor = Color.FromArgb(255, 174, 161);
-        errorLabel.Padding = new Padding(0, 10, 0, 4);
-        errorLabel.Visible = false;
-        shell.Controls.Add(errorLabel, 0, 3);
-        shell.SizeChanged += (_, _) => errorLabel.MaximumSize = new Size(Math.Max(160, shell.ClientSize.Width - shell.Padding.Horizontal - 8), 0);
+        rail.Controls.Add(steps, 0, 2);
+        var tip = Note("长按左 X，读懂眼前。\n1.5 秒截图 · 3 秒取消");
+        tip.Font = new Font(Font.FontFamily, 8.5f); tip.MaximumSize = new Size(160, 0); rail.Controls.Add(tip, 0, 4);
 
+        var shell = new TableLayoutPanel { Dock = DockStyle.Fill, ColumnCount = 1, RowCount = 4,
+            Padding = new Padding(4, 14, 2, 2), Margin = Padding.Empty };
+        shell.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        shell.RowStyles.Add(new RowStyle(SizeType.AutoSize)); shell.RowStyles.Add(new RowStyle(SizeType.Percent, 100));
+        shell.RowStyles.Add(new RowStyle(SizeType.AutoSize)); shell.RowStyles.Add(new RowStyle(SizeType.AutoSize));
+        frame.Controls.Add(shell, 1, 0);
+        var header = Stack();
+        var eyebrow = Note(firstRun ? "初次见面，三步准备。" : "重新配置，继续交流。", "wizardIntro");
+        eyebrow.ForeColor = UiTheme.Accent; eyebrow.Font = new Font(Font.FontFamily, 9f);
+        pageTitle.ForeColor = UiTheme.Ink; pageTitle.Font = new Font(Font.FontFamily, 20f, FontStyle.Bold);
+        pageTitle.Margin = new Padding(0, 4, 0, 22);
+        Add(header, eyebrow); Add(header, pageTitle); shell.Controls.Add(header, 0, 0);
+        shell.Controls.Add(viewport, 0, 1);
+        errorLabel.ForeColor = Color.FromArgb(255, 174, 161); errorLabel.Padding = new Padding(0, 8, 0, 2);
+        errorLabel.Visible = false; shell.Controls.Add(errorLabel, 0, 2);
+        shell.SizeChanged += (_, _) => errorLabel.MaximumSize = new Size(Math.Max(160, shell.ClientSize.Width - shell.Padding.Horizontal - 8), 0);
         var footer = new TableLayoutPanel { Dock = DockStyle.Fill, AutoSize = true, ColumnCount = 4, Margin = new Padding(0, 16, 8, 0) };
-        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
-        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
-        cancelButton.Text = firstRun ? "暂不设置，退出" : "取消";
-        footer.Controls.Add(cancelButton, 0, 0);
-        footer.Controls.Add(backButton, 2, 0);
-        footer.Controls.Add(nextButton, 3, 0);
-        shell.Controls.Add(footer, 0, 4);
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); footer.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100));
+        footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize)); footer.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize));
+        cancelButton.Text = firstRun ? "退出设置" : "取消";
+        cancelButton.Margin = Padding.Empty;
+        footer.Controls.Add(cancelButton, 0, 0); footer.Controls.Add(backButton, 2, 0); footer.Controls.Add(nextButton, 3, 0);
+        shell.Controls.Add(footer, 0, 3);
     }
 
     private TableLayoutPanel BuildChoicePage()
     {
         var page = Stack();
-        var card = Card(page, "用什么来识别和翻译", "可以先用默认选项，之后在主界面随时调整");
-        Row(card, "翻译服务", backend);
-        Row(card, "识图方式", processingMode);
-        Row(card, "目标语言", targetLanguage);
-        Row(card, "", modeNote, fullWidth: true);
-        var note = Card(page, "先了解图片去向", "选择视觉识别前，可以确认哪一步会发送图片");
-        Row(note, "", Note("本地 OCR 在电脑上识别，只把原文交给翻译服务。\n直接识图和 AI 手写识别会把截图交给所选 Codex / API。\n本机 API 需要你提前启动服务并加载合适的模型。"), true);
+        Add(page, Note("选择后可继续配置。以后也能在工作台随时切换。"));
+        for (int index = 0; index < serviceChoices.Length; index++)
+        {
+            var option = serviceChoices[index]; option.TabIndex = index;
+            option.AccessibleDescription = option.Description;
+            option.AutoSize = true; Add(page, option);
+        }
+        var help = Note("中 / 日 / 英识别与翻译 · 支持手柄和键盘触发", "wizardChoiceHint");
+        help.Font = new Font(Font.FontFamily, 8.5f); help.Margin = new Padding(4, 10, 0, 10); Add(page, help);
         return page;
     }
 
     private TableLayoutPanel BuildServicePage()
     {
         var page = Stack();
+        creditCard = Card(page, "用一个账号，开始翻译", "无需自备模型或 API 密钥");
+        Row(creditCard, "", Note("完整翻译成功扣 1 积分；无字、失败或完成前取消不扣。\n可使用兑换码获取积分，充值方案以账户窗口实际显示为准。"), true);
+        Row(creditCard, "", openAccount, true);
+        accountStatus.ForeColor = UiTheme.Accent;
+        Row(creditCard, "", accountStatus, true);
+        Row(creditCard, "", creditDestination, true);
+        Row(creditCard, "", creditAdvanced, true);
+        creditAddressCard = Card(page, "其他积分服务器", "只在使用其他运营者或本机开发服务时修改");
+        Row(creditAddressCard, "服务地址", creditServer);
+        Row(creditAddressCard, "", Note("登录会话按服务地址独立保存。修改地址后，请重新进入账户窗口登录。"), true);
         codexCard = Card(page, "使用已登录的 Codex", "无需在此填写 API 密钥；模型调用仍需要网络");
         Row(codexCard, "程序路径", codexPath);
         Row(codexCard, "模型", codexModel);
@@ -368,10 +434,70 @@ internal sealed class SetupWizardForm : Form
 
         googleCard = Card(page, "Google Translate 后台网页", "适合先在本机识别，再翻译原文");
         Row(googleCard, "", Note("无需 API 密钥。程序在独立 WebView2 网页中输入识别文字、读取译文，不抢占桌面鼠标。\n图片留在本机，只有识别原文发送给 Google Translate。\n需要网络和 WebView2 Runtime；网页验证、限流或页面变化可能使翻译暂时不可用。\n此服务不识别图片，请使用本地 OCR 或本地日语手写 OCR。"), true);
-        creditCard = Card(page, "积分服务", "完整翻译成功扣 1 积分，爱发电购买次数包");
-        Row(creditCard, "服务地址", creditServer);
-        Row(creditCard, "", Note("填写运营者提供的 HTTPS 地址。本机地址 http://127.0.0.1:5187 用于开发测试。\n保存后到「AI 服务 → 账号与积分」注册、登录和购买次数包。\n本步骤只保存服务地址，不会创建账号、付款或发送截图。"), true);
+        var recognition = Card(page, "识图与语言", "选好后，截图就交给所选服务处理");
+        Row(recognition, "识图方式", processingMode);
+        Row(recognition, "目标语言", targetLanguage);
+        Row(recognition, "", modeNote, true);
         return page;
+    }
+
+    private void ServiceChanged()
+    {
+        if (SelectedBackend == "GoogleTranslate" && SelectedMode is "Image" or "Handwriting")
+        {
+            modeBeforeGoogle = processingMode.SelectedIndex;
+            processingMode.SelectedIndex = 0;
+        }
+        else if (SelectedBackend != "GoogleTranslate" && modeBeforeGoogle is int previous)
+        {
+            modeBeforeGoogle = null;
+            processingMode.SelectedIndex = previous;
+        }
+        RefreshServiceChoices();
+    }
+
+    private void OpenAccount()
+    {
+        try
+        {
+            _ = CreditServiceClient.NormalizeServerUrl(creditServer.Text);
+            using var account = new CreditAccountForm(creditServer.Text);
+            account.ShowDialog(this);
+            creditServer.Text = account.ServerUrl.TrimEnd('/');
+            creditAdvanced.Checked = creditServer.Text != OfficialCreditServerUrl;
+            RefreshAccountStatus();
+            ClearError();
+        }
+        catch (Exception error) { ShowError(error.Message); }
+    }
+
+    private void RefreshAccountStatus()
+    {
+        creditDestination.Text = creditAdvanced.Checked ? "自定义服务 · 请核对下方地址后登录。" : "官方服务 · " + OfficialCreditServerUrl;
+        try
+        {
+            var session = loadSession(creditServer.Text);
+            accountStatus.Text = session is null ? "尚未登录 · 可现在登录，也可进入工作台后继续。"
+                : $"已保存 {session.Username} 的登录 · 余额和登录有效性可在账户窗口刷新。";
+        }
+        catch (Exception)
+        {
+            accountStatus.Text = "请确认服务地址，再打开账户窗口。";
+        }
+    }
+
+    protected override void OnLoad(EventArgs e)
+    {
+        base.OnLoad(e);
+        if (StartPosition == FormStartPosition.Manual) return;
+        var area = (Owner is null ? Screen.FromControl(this) : Screen.FromControl(Owner)).WorkingArea;
+        int gap = LogicalToDeviceUnits(8);
+        var limit = new Size(Math.Max(1, area.Width - 2 * gap), Math.Max(1, area.Height - 2 * gap));
+        MinimumSize = new Size(Math.Min(MinimumSize.Width, limit.Width), Math.Min(MinimumSize.Height, limit.Height));
+        Size = new Size(Math.Min(Width, limit.Width), Math.Min(Height, limit.Height));
+        var anchor = Owner?.Bounds ?? area;
+        Location = new Point(Math.Clamp(anchor.X + (anchor.Width - Width) / 2, area.Left, area.Right - Width),
+            Math.Clamp(anchor.Y + (anchor.Height - Height) / 2, area.Top, area.Bottom - Height));
     }
 
     private TableLayoutPanel BuildCapturePage()
@@ -398,6 +524,7 @@ internal sealed class SetupWizardForm : Form
         apiCard.Visible = SelectedBackend == "OpenAI";
         googleCard.Visible = SelectedBackend == "GoogleTranslate";
         creditCard.Visible = SelectedBackend == "Credits";
+        creditAddressCard.Visible = SelectedBackend == "Credits" && creditAdvanced.Checked;
         bool incompatible = SelectedBackend == "GoogleTranslate" && SelectedMode is "Image" or "Handwriting";
         modeNote.ForeColor = incompatible ? Color.FromArgb(255, 174, 161) : UiTheme.Muted;
         modeNote.Text = incompatible
@@ -420,7 +547,7 @@ internal sealed class SetupWizardForm : Form
     {
         if (loading) return;
         var draft = ReadSettingsDraft();
-        string service = SelectedBackend switch { "OpenAI" => "其他 AI API", "GoogleTranslate" => "Google Translate 后台网页", "Credits" => "积分服务（爱发电）", _ => "本机 Codex" };
+        string service = SelectedBackend switch { "OpenAI" => "自己的 API 服务", "GoogleTranslate" => "本地 OCR + Google 翻译", "Credits" => "账号积分服务", _ => "本机 Codex" };
         string mode = processingMode.SelectedItem?.ToString() ?? "本地OCR（不推荐）";
         string reasoning = draft.CodexReasoningEffort.Length == 0 ? "自动（按阶段）" : draft.CodexReasoningEffort;
         string model = SelectedBackend == "Codex" ? (draft.CodexModel.Length == 0 ? "CLI 默认模型" : draft.CodexModel) : draft.ApiModel;
@@ -436,7 +563,7 @@ internal sealed class SetupWizardForm : Form
             _ => "上方配置的 API 地址"
         };
         disclosure.Text = draft.ProcessingMode is "Image" or "Handwriting"
-            ? $"数据去向：截图{(draft.ProcessingMode == "Handwriting" ? "及局部细节图" : "")}会发送给{destination}。"
+            ? $"数据去向：截图{(draft.ProcessingMode == "Handwriting" && SelectedBackend != "Credits" ? "及局部细节图" : "")}会发送给{destination}。"
             : $"数据去向：图片在本机识别，只有识别原文发送给{destination}。";
         disclosure.Text += SelectedBackend == "Credits"
             ? "\n积分服务器保存订单、消费流水及近期原文/译文，便于断线后恢复。图片仅用于本次任务。\n任务完成后隐藏字幕不会退款；仅 AI 识别请使用自备服务或本地 OCR。"
@@ -463,9 +590,9 @@ internal sealed class SetupWizardForm : Form
         viewport.ResumeLayout(true);
         pageTitle.Text = CurrentStep switch
         {
-            0 => "三步完成设置，之后也可以在主界面更改。",
-            1 => "填写所选服务的必要信息。本步骤不会发起网络请求。",
-            _ => "选好截图方式，确认数据去向，然后开始使用。"
+            0 => "选择你的翻译服务",
+            1 => "连接服务，准备识图",
+            _ => "准备好，读懂眼前"
         };
         for (int index = 0; index < stepLabels.Length; index++)
         {
@@ -473,12 +600,12 @@ internal sealed class SetupWizardForm : Form
             stepLabels[index].ForeColor = index == CurrentStep ? UiTheme.Accent : index < CurrentStep ? UiTheme.Ink : UiTheme.Muted;
         }
         backButton.Enabled = CurrentStep > 0;
-        nextButton.Text = CurrentStep == 2 ? "保存并开始" : "下一步";
+        nextButton.Text = CurrentStep == 2 ? "保存并进入工作台" : "下一步";
         RefreshSummary();
         Control focus = CurrentStep switch
         {
-            0 => backend,
-            1 => SelectedBackend switch { "OpenAI" => apiEndpoint, "Codex" => codexModel, "Credits" => creditServer, _ => nextButton },
+            0 => serviceChoices.Single(choice => choice.Checked),
+            1 => SelectedBackend switch { "OpenAI" => apiEndpoint, "Codex" => codexModel, "Credits" => openAccount, _ => processingMode },
             _ => hotkey
         };
         if (Visible) focus.Focus();

@@ -270,7 +270,7 @@ internal static partial class Program
         start.Environment["ASPNETCORE_ENVIRONMENT"] = "Production"; start.Environment["DOTNET_ENVIRONMENT"] = "Production";
         start.Environment["MUGONZEI_DATABASE"] = fixture.Path;
         start.Environment["MUGONZEI_LIVE_PAYMENTS"] = "false"; start.Environment["MUGONZEI_MOCK_PAYMENTS"] = "false";
-        start.Environment["MUGONZEI_PLANS_JSON"] = "[]";
+        start.Environment["MUGONZEI_PLANS_JSON"] = JsonSerializer.Serialize(new[] { new Plan("draft", "Synthetic unpublished plan", 10, 100, "draft-plan") }, TranslationInput.Json);
         start.Environment["Translation__Mock"] = "false"; start.Environment["Translation__BaseUrl"] = "";
         start.Environment["Translation__ApiKey"] = ""; start.Environment["Translation__Model"] = "";
         start.Environment["Logging__LogLevel__Default"] = "Warning";
@@ -289,6 +289,8 @@ internal static partial class Program
                 await Task.Delay(50, deadline.Token);
             }
             Check(ready, "Actual production entry point starts for the isolated redemption contract test");
+            var publicPlans = await http.GetFromJsonAsync<JsonElement[]>("v1/plans", deadline.Token);
+            Equal(0, publicPlans!.Length, "Configured draft plans stay hidden while both real and mock payments are disabled");
             var issued = fixture.Store.CreateRedemptionCodes(12, 2, null, "HTTP synthetic");
             using var unauthenticated = await http.PostAsJsonAsync("v1/redemptions", new { code = issued[0].Code }, deadline.Token);
             Equal(HttpStatusCode.Unauthorized, unauthenticated.StatusCode, "Actual redemption endpoint rejects missing sessions");
@@ -300,6 +302,8 @@ internal static partial class Program
             }
             AuthReply first = await Register("redeem_http_first"), second = await Register("redeem_http_second");
             http.DefaultRequestHeaders.Authorization = new("Bearer", first.Token);
+            using var disabledPurchase = await http.PostAsJsonAsync("v1/orders", new { planId = "draft", requestId = Guid.NewGuid() }, deadline.Token);
+            Equal(HttpStatusCode.ServiceUnavailable, disabledPurchase.StatusCode, "Hiding draft plans preserves the disabled payment guard on order creation");
             using var response = await http.PostAsJsonAsync("v1/redemptions", new { code = issued[0].Code.ToLowerInvariant() }, deadline.Token);
             Equal(HttpStatusCode.OK, response.StatusCode, "Authenticated HTTP redemption succeeds");
             var result = (await response.Content.ReadFromJsonAsync<RedemptionResult>(deadline.Token))!;

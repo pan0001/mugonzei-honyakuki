@@ -112,7 +112,8 @@ app.MapGet("/v1/account", (HttpContext context, Store store) => store.GetAccount
 app.MapGet("/v1/ledger", (HttpContext context, Store store) => store.GetLedger(AuthService.UserId(context)));
 app.MapPost("/v1/redemptions", (RedeemCodeRequest input, HttpContext context, Store store) =>
     store.RedeemCode(AuthService.UserId(context), input.Code)).RequireRateLimiting("redemption");
-app.MapGet("/v1/plans", () => options.Plans.Select(plan => new { plan.Id, plan.Name, plan.Credits, plan.AmountFen }));
+app.MapGet("/v1/plans", () => options.Plans.Where(_ => options.LivePayments || options.MockPayments)
+    .Select(plan => new { plan.Id, plan.Name, plan.Credits, plan.AmountFen }));
 
 object OrderReply(HttpContext context, OrderRecord order)
 {
