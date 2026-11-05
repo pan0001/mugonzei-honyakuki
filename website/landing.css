@@ -85,6 +85,14 @@ h1 em { font-style: normal; color: var(--purple); }
 #replay svg { width: 14px; fill: currentColor; }
 #replay:hover { background: #38384d; }
 #replay:disabled { color: #d1c6ed; }
+.recharge-offer { display: flex; flex-wrap: wrap; align-items: center; gap: 15px clamp(20px, 4vw, 58px); border-top: 1px solid var(--line); padding-block: 24px 30px; }
+.recharge-intro { flex: 1 1 270px; }
+.recharge-intro h2 { font-size: clamp(20px, 2.1vw, 28px); }
+.recharge-intro p, .recharge-price small { color: var(--muted); font-size: 13px; }
+.recharge-intro p { margin-top: 5px; }
+.recharge-price strong, .recharge-price small { display: block; }
+.recharge-price strong { font-size: 19px; }
+.recharge-price span { color: var(--purple); }
 .start { padding-block: clamp(46px, 6vw, 90px); background: #edece8; border-block: 1px solid var(--line); }
 .start-grid, .questions { display: grid; grid-template-columns: minmax(230px, .77fr) minmax(0, 1.23fr); gap: clamp(32px, 7vw, 105px); }
 h2 { font-size: clamp(30px, 3vw, 49px); line-height: 1.22; letter-spacing: -.055em; font-weight: 720; }

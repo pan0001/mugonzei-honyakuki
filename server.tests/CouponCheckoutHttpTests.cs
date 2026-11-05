@@ -27,12 +27,14 @@ internal static partial class Program
         CouponOperatorCli();
         using var fixture = new Fixture();
         var p = new Plan("credits-200", "200 积分", 200, 500, new string('a', 32));
+        var larger = new Plan("credits-500", "500 积分", 500, 1000, new string('c', 32));
+        var other = new Plan("unrelated-200", "普通套餐", 200, 500, new string('d', 32));
         var deal = fixture.Store.CreateCoupon([p], p.Id, 400, new string('b', 32), DateTimeOffset.UtcNow.AddDays(1), "TEST-SAVE");
         string buyer = fixture.User(), token = new string('x', 43);
         fixture.Store.CreateSession(buyer, Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(token))), DateTimeOffset.UtcNow.AddMinutes(5));
         var ready = new TaskCompletionSource<(Uri, IHostApplicationLifetime)>(TaskCreationOptions.RunContinuationsAsynchronously);
         var host = MugonzeiHost.RunAsync(["--environment", "Development", "--urls", "http://127.0.0.1:0",
-            "--MUGONZEI_DATABASE", fixture.Path, "--MUGONZEI_PLANS_JSON", JsonSerializer.Serialize(new[] { p }),
+            "--MUGONZEI_DATABASE", fixture.Path, "--MUGONZEI_PLANS_JSON", JsonSerializer.Serialize(new[] { p, larger, other }),
             "--MUGONZEI_LIVE_PAYMENTS", "false", "--MUGONZEI_MOCK_PAYMENTS", "true", "--MUGONZEI_TRUSTED_PROXIES", "",
             "--Translation:Mock","false","--Translation:BaseUrl","","--Translation:ApiKey","","--Logging:LogLevel:Default","Warning"],
             services => services.AddSingleton<IHostedService>(sp => new CheckoutTestAddress(
@@ -51,10 +53,22 @@ internal static partial class Program
                 Equal(expected, response.StatusCode, url + " has expected HTTP status");
                 return expected == HttpStatusCode.OK ? await response.Content.ReadFromJsonAsync<JsonElement>() : default;
             }
+            var catalog = await http.GetFromJsonAsync<JsonElement[]>("v1/plans");
+            foreach (var plan in catalog!)
+            {
+                bool supported = plan.GetProperty("id").GetString() != other.Id;
+                Equal(supported ? 100 : 0, plan.GetProperty("firstRechargeBonusCredits").GetInt32(), "Only designated packages advertise a possible first recharge bonus");
+                Equal(plan.GetProperty("id").GetString() == larger.Id ? 500 : 200, plan.GetProperty("credits").GetInt32(), "Package credits keep the base amount");
+                Check(!plan.TryGetProperty("firstRechargeEligible", out _), "Public package response never includes account eligibility");
+            }
+            Equal(3, catalog.Length, "Public catalog contains both bonus packages and an ordinary one");
             await Post("v1/checkout/quote", quote, HttpStatusCode.Unauthorized);
             await Post("v1/checkout/orders", checkout, HttpStatusCode.Unauthorized);
             http.DefaultRequestHeaders.Authorization = new("Bearer", token);
+            async Task<bool> Eligible() => (await http.GetFromJsonAsync<JsonElement>("v1/account")).GetProperty("firstRechargeEligible").GetBoolean();
+            Check(await Eligible(), "Fresh account is eligible before checkout");
             var priced = await Post("v1/checkout/quote", quote, HttpStatusCode.OK);
+            Equal(100, priced.GetProperty("firstRechargeBonusCredits").GetInt32(), "Coupon price keeps the first recharge opportunity on the original package");
             Check(priced.GetProperty("credits").GetInt32()==200 && priced.GetProperty("originalAmountFen").GetInt32()==500
                 && priced.GetProperty("discountFen").GetInt32()==100 && priced.GetProperty("amountFen").GetInt32()==400,
                 "Quote displays 5 yuan less 1 yuan for all 200 credits");
@@ -62,6 +76,9 @@ internal static partial class Program
             await Post("v1/checkout/orders", new { planId = p.Id, couponCode = deal.Code, requestId = req, expectedAmountFen=1 }, HttpStatusCode.Conflict);
             Equal(0,fixture.Store.GetOrders(buyer).Count,"Preview and rejected prices do not make orders");
             var placed = await Post("v1/checkout/orders", checkout, HttpStatusCode.OK);
+            Check(placed.GetProperty("credits").GetInt32() == 200 && placed.GetProperty("creditedCredits").ValueKind == JsonValueKind.Null
+                && placed.GetProperty("firstRechargeBonusCredits").GetInt32() == 0 && placed.GetProperty("potentialFirstRechargeBonusCredits").GetInt32() == 100
+                && await Eligible(), "Pending checkout does not award credits or consume eligibility");
             Check(placed.GetProperty("amountFen").GetInt32()==400 && placed.GetProperty("discountFen").GetInt32()==100,
                 "Placed order uses confirmed quotation");
             string id = placed.GetProperty("id").GetString()!;
@@ -78,7 +95,16 @@ internal static partial class Program
                 using var response=await noSession.PostAsync(pay,new FormUrlEncodedContent(new Dictionary<string,string>{{"confirmation",confirmation}}));
                 Equal(HttpStatusCode.OK,response.StatusCode,"Simulated discount payment succeeds or replays");
             }
-            Equal(200L,fixture.Store.GetAccount(buyer).Balance,"Repeated payment credits 200 once");
+            Equal(300L,fixture.Store.GetAccount(buyer).Balance,"Repeated payment credits 200 plus the first recharge bonus once");
+            Check(!await Eligible(), "A settled payment consumes first-recharge eligibility");
+            var nextQuote = await Post("v1/checkout/quote", quote, HttpStatusCode.OK);
+            Equal(0, nextQuote.GetProperty("firstRechargeBonusCredits").GetInt32(), "Returning account no longer receives a coupon bonus preview");
+            var paid = await Post("v1/checkout/orders", checkout, HttpStatusCode.OK);
+            Check(paid.GetProperty("id").GetString() == id && paid.GetProperty("credits").GetInt32() == priced.GetProperty("credits").GetInt32()
+                && paid.GetProperty("creditedCredits").GetInt32() == 300 && paid.GetProperty("firstRechargeBonusCredits").GetInt32() == 100,
+                "Paid retry preserves the old checkout contract and exposes actual credited total and bonus separately");
+            var history = await http.GetFromJsonAsync<JsonElement[]>("v1/orders");
+            Equal(300, history!.Single().GetProperty("creditedCredits").GetInt32(), "Order history exposes the same credited total as checkout retries");
             fixture.Store.RevokeCoupon(deal.Id);
             await Post("v1/checkout/quote",quote,HttpStatusCode.BadRequest);
             await Post("v1/checkout/orders",new {planId=p.Id, couponCode=deal.Code, expectedAmountFen=400, requestId=Guid.NewGuid()},HttpStatusCode.BadRequest);

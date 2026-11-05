@@ -69,6 +69,7 @@ internal static partial class Program
         var second = fixture.Store.CreateOrder(other, Guid.NewGuid().ToString(), plan);
         Throws(409, () => fixture.Store.CreditOrder(second.Id, "fixture-trade", 100, second.AfdianPlanId, second.CustomId));
         Equal(0L, fixture.Store.GetAccount(other).Balance, "A provider trade cannot fund another user");
+        await FirstRechargeAccounting();
     }
 
     private static async Task AuthenticationPersistence()

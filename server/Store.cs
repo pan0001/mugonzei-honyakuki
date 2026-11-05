@@ -5,15 +5,26 @@ using Microsoft.Data.Sqlite;
 namespace Mugonzei.Server;
 
 public sealed record UserRecord(string Id, string Username, byte[] PasswordHash, byte[] Salt, int Iterations);
-public sealed record AccountRecord(string Username, long Balance, long Reserved);
+public sealed record AccountRecord(string Username, long Balance, long Reserved)
+{
+    public bool FirstRechargeEligible { get; init; }
+}
 public sealed record LedgerRecord(string Kind, long Amount, long Balance, DateTimeOffset CreatedAt, string Reference);
 public sealed record OrderRecord(string Id, string UserId, string RequestId, string PlanId, string Name,
     int Credits, int AmountFen, string AfdianPlanId, string CustomId, string Status, DateTimeOffset CreatedAt)
 {
     public int OriginalAmountFen { get; init; } = AmountFen;
     public int DiscountFen => OriginalAmountFen - AmountFen;
+    public int FirstRechargeBonusCredits { get; init; }
+    public int BaseCredits => Credits - FirstRechargeBonusCredits;
 }
 public sealed record RefundRecord(string Id, string OrderId, string Status, int Credits, DateTimeOffset CreatedAt);
+
+internal static class FirstRechargeBonus
+{
+    internal static int ForPlan(string planId, int baseCredits, int originalAmountFen) =>
+        (planId, baseCredits, originalAmountFen) is ("credits-200", 200, 500) or ("credits-500", 500, 1000) ? 100 : 0;
+}
 
 /// <summary>All monetary state transitions occur in immediate SQLite transactions.</summary>
 public sealed partial class Store
@@ -52,6 +63,11 @@ public sealed partial class Store
               created_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY(user_id,id));
             CREATE INDEX IF NOT EXISTS ledger_user_created ON ledger(user_id,id);
             CREATE INDEX IF NOT EXISTS orders_user_created ON orders(user_id,created_at);
+            CREATE INDEX IF NOT EXISTS orders_successful_recharge_user ON orders(user_id)
+              WHERE status IN ('paid','refund_pending','refunded');
+            CREATE TABLE IF NOT EXISTS first_recharge_bonuses (
+              order_id TEXT PRIMARY KEY REFERENCES orders(id), user_id TEXT NOT NULL UNIQUE REFERENCES users(id),
+              bonus_credits INTEGER NOT NULL CHECK(bonus_credits>0)) WITHOUT ROWID;
             """);
         InitializeRedemptionSchema(db);
         InitializeEmailSchema(db);
@@ -121,9 +137,14 @@ public sealed partial class Store
     { using var db = Open(); return Account(db, null, userId); }
     private static AccountRecord Account(SqliteConnection db, SqliteTransaction? tx, string userId)
     {
-        using var command = Command(db, tx, "SELECT username,balance,reserved FROM users WHERE id=$user", ("$user", userId));
+        using var command = Command(db, tx, """
+            SELECT username,balance,reserved,
+              NOT EXISTS (SELECT 1 FROM orders WHERE user_id=$user AND status IN ('paid','refund_pending','refunded'))
+            FROM users WHERE id=$user
+            """, ("$user", userId));
         using var reader = command.ExecuteReader();
-        return reader.Read() ? new(reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2)) : throw Missing();
+        return reader.Read() ? new(reader.GetString(0), reader.GetInt64(1), reader.GetInt64(2))
+            { FirstRechargeEligible = reader.GetBoolean(3) } : throw Missing();
     }
     public IReadOnlyList<LedgerRecord> GetLedger(string userId)
     {
@@ -184,11 +205,12 @@ public sealed partial class Store
     }
     private const string OrderColumns = """
         id,user_id,request_id,plan_id,name,credits,amount_fen,afdian_plan_id,custom_id,status,created_at,
-        COALESCE((SELECT original_amount_fen FROM order_coupons WHERE order_id=orders.id),amount_fen)
+        COALESCE((SELECT original_amount_fen FROM order_coupons WHERE order_id=orders.id),amount_fen),
+        COALESCE((SELECT bonus_credits FROM first_recharge_bonuses WHERE order_id=orders.id),0)
         """;
     private static OrderRecord Order(SqliteDataReader r) => new(r.GetString(0), r.GetString(1), r.GetString(2), r.GetString(3), r.GetString(4),
         r.GetInt32(5), r.GetInt32(6), r.GetString(7), r.GetString(8), r.GetString(9), Date(r.GetString(10)))
-        { OriginalAmountFen = r.GetInt32(11) };
+        { OriginalAmountFen = r.GetInt32(11), FirstRechargeBonusCredits = r.GetInt32(12) };
     private static OrderRecord? ReadOrder(SqliteConnection db, SqliteTransaction? tx, string where, params (string, object?)[] values)
     {
         using var command = Command(db, tx, "SELECT " + OrderColumns + " FROM orders WHERE " + where, values);
@@ -217,12 +239,22 @@ public sealed partial class Store
         if (order.Status != "pending") { tx.Commit(); return order; }
         using (var duplicate = Command(db, tx, "SELECT id FROM orders WHERE provider_trade_no=$trade", ("$trade", providerTradeNo)))
             if (duplicate.ExecuteScalar() is not null) throw new ApiException(409, "payment_used", "该支付订单已被处理。");
-        Execute(db, tx, "UPDATE orders SET status='paid',provider_trade_no=$trade WHERE id=$id", ("$trade", providerTradeNo), ("$id", order.Id));
+        // Award only when the provider payment settles. Concurrent orders may both have been
+        // quoted as eligible; this immediate transaction also serializes notification replays.
+        int bonus = FirstRechargeBonus.ForPlan(order.PlanId, order.BaseCredits, order.OriginalAmountFen);
+        if (bonus > 0 && !Account(db, tx, order.UserId).FirstRechargeEligible) bonus = 0;
+        int credited = checked(order.BaseCredits + bonus);
+        if (bonus > 0)
+            Execute(db, tx, "INSERT INTO first_recharge_bonuses(order_id,user_id,bonus_credits) VALUES($id,$user,$bonus)",
+                ("$id", order.Id), ("$user", order.UserId), ("$bonus", bonus));
+        // Refunds, including those handled by an older binary, must recover the full amount awarded.
+        Execute(db, tx, "UPDATE orders SET status='paid',provider_trade_no=$trade,credits=$credits WHERE id=$id",
+            ("$trade", providerTradeNo), ("$credits", credited), ("$id", order.Id));
         if (Execute(db, tx, "UPDATE users SET balance=balance+$amount WHERE id=$user AND balance<=$limit",
-            ("$amount", order.Credits), ("$user", order.UserId), ("$limit", long.MaxValue - order.Credits)) != 1)
+            ("$amount", credited), ("$user", order.UserId), ("$limit", long.MaxValue - credited)) != 1)
             throw new ApiException(409, "credit_limit", "积分余额已达到上限，暂时无法入账。");
-        Ledger(db, tx, order.UserId, "recharge", order.Credits, "payment:" + providerTradeNo);
-        tx.Commit(); return order with { Status = "paid" };
+        Ledger(db, tx, order.UserId, "recharge", credited, "payment:" + providerTradeNo);
+        tx.Commit(); return order with { Status = "paid", Credits = credited, FirstRechargeBonusCredits = bonus };
     }
 
     public RefundRecord HoldRefund(string orderId, string requestId)

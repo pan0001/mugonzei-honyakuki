@@ -130,7 +130,7 @@ internal static partial class Program
         gateway.Orders = [verified];
         await service.NotifyAsync(verified.TradeNo, default);
         await service.NotifyAsync(verified.TradeNo, default);
-        Equal(200L, upgraded.GetAccount(user).Balance, "Verified snapshot grants the entire benefit once, even after revocation");
+        Equal(300L, upgraded.GetAccount(user).Balance, "The verified discounted first recharge grants the base and bonus once, even after coupon revocation");
         Equal(1, upgraded.GetLedger(user).Count, "Provider retries produce one ledger entry");
         Throws(409, () => service.ApplyVerified(verified with { CustomId = otherOrder.CustomId }));
         Equal(0L, upgraded.GetAccount(other).Balance, "Provider transaction cannot transfer between users");

@@ -27,6 +27,7 @@
   let couponRequest = null;
   let confirmedQuote = null;
   let plans = [];
+  let firstRechargeEligible = null;
 
   class ApiError extends Error {
     constructor(message, status = 0, code = '') { super(message); this.status = status; this.code = code; }
@@ -47,6 +48,9 @@
     createdOrders.clear();
     mismatchedOrders.clear();
     closeCoupon();
+    firstRechargeEligible = null;
+    $('first-recharge-status').hidden = true;
+    $('first-recharge-status').textContent = '';
     $('plans').replaceChildren();
     $('auth-section').hidden = false;
     $('dashboard').hidden = true;
@@ -303,6 +307,20 @@
   function formatDate(value) { const parsed = new Date(value); return Number.isNaN(parsed.getTime()) ? '—' : date.format(parsed); }
   function formatMoney(fen) { return '¥' + (Number(fen) / 100).toFixed(2); }
   function formatNumber(value) { return Number.isSafeInteger(value) ? number.format(value) : '—'; }
+  function hasBonus(value) { return Number.isSafeInteger(value) && value > 0; }
+  function previewQuantity(base, bonus) {
+    return hasBonus(bonus) && Number.isSafeInteger(base + bonus)
+      ? '若本单首笔到账，共 ' + formatNumber(base + bonus) + ' 积分（常规 ' + formatNumber(base) + ' + 首充赠 ' + formatNumber(bonus) + '）'
+      : formatNumber(base) + ' 积分';
+  }
+  function orderQuantity(order) {
+    if (order.status === 'pending')
+      return previewQuantity(order.credits, firstRechargeEligible === true ? order.potentialFirstRechargeBonusCredits : 0);
+    if (!Number.isSafeInteger(order.creditedCredits)) return formatNumber(order.credits) + ' 积分';
+    const label = ['refunded','refund_pending'].includes(order.status) ? '原到账 ' : '到账 ';
+    return label + formatNumber(order.creditedCredits) + ' 积分' + (hasBonus(order.firstRechargeBonusCredits)
+      ? '（含首充赠 ' + formatNumber(order.firstRechargeBonusCredits) + '）' : '');
+  }
   function tableMessage(id, text) {
     const row = node('tr');
     const cell = node('td', text, 'empty-state'); cell.colSpan = 5;
@@ -322,6 +340,12 @@
 
   function renderPlans() {
     const list = $('plans'); list.replaceChildren();
+    const notice = $('first-recharge-status');
+    notice.hidden = !plans.some(plan => hasBonus(plan.firstRechargeBonusCredits));
+    notice.textContent = notice.hidden ? '' : firstRechargeEligible === true
+      ? '本账户可享首充奖励。两个档位共用一次，以最先核验到账的充值为准。'
+      : firstRechargeEligible === false ? '本账户已有充值记录，本次按常规次数到账。'
+      : '首充资格暂未确认。请刷新账户查看，本页暂按常规次数展示。';
     if (couponPlan && !plans.some(plan => plan.id === couponPlan.id)) closeCoupon();
     if (!plans.length) {
       list.append(node('p', '充值暂未开放。当前没有可购买的积分方案，请稍后再来。', 'empty-state'));
@@ -330,7 +354,11 @@
     for (const plan of plans) {
       const card = node('div', undefined, 'plan-card');
       const detail = node('div');
-      detail.append(node('h4', plan.name), node('p', formatNumber(plan.credits) + ' 积分 · ' + formatMoney(plan.amountFen), 'muted'));
+      const bonus = firstRechargeEligible === true ? plan.firstRechargeBonusCredits : 0;
+      const baseOnlyTitle = typeof plan.name === 'string' && plan.name.replace(/\s+/g, '') === plan.credits + '积分';
+      const title = hasBonus(bonus) && baseOnlyTitle ? number.format(plan.amountFen / 100) + ' 元首充' : plan.name;
+      detail.append(node('h4', title), node('p', formatMoney(plan.amountFen) + ' · ' +
+        previewQuantity(plan.credits, bonus), 'plan-quantity'));
       const existing = createdOrders.get(plan.id);
       const pending = pendingRequests.has(plan.id);
       const label = pending ? '重试创建订单' : existing ? '查看待付款订单' : '按原价创建订单';
@@ -358,7 +386,7 @@
       const idCell = node('td'); const id = node('code', String(order.id).slice(0, 10) + '…', 'record-id'); id.title = String(order.id); idCell.append(id); row.append(idCell);
       const price = node('td');
       const priceLabel = ['paid','refund_pending','refunded'].includes(order.status) ? '实付 ' : order.status === 'pending' ? '应付 ' : '订单金额 ';
-      price.append(node('span', formatNumber(order.credits) + ' 积分'), node('strong', priceLabel + formatMoney(order.amountFen)));
+      price.append(node('span', orderQuantity(order)), node('strong', priceLabel + formatMoney(order.amountFen)));
       if (Number.isSafeInteger(order.discountFen) && order.discountFen > 0 && Number.isSafeInteger(order.originalAmountFen))
         price.append(node('small', '原价 ' + formatMoney(order.originalAmountFen) + ' · 已减 ' + formatMoney(order.discountFen)));
       price.className = 'order-price';
@@ -390,7 +418,10 @@
 
   function updatePlanStatus(rows) {
     $('service-title').textContent = rows.length ? '充值方案已上架' : '充值暂未开放';
-    $('service-description').textContent = rows.length ? '登录后查看方案。实际付款和到账状态以服务器核验为准。' : '当前没有可购买的方案。可先使用客户端的自有翻译服务；积分翻译是否开放以客户端服务状态为准。';
+    const offers = rows.filter(plan => hasBonus(plan.firstRechargeBonusCredits) && Number.isSafeInteger(plan.credits + plan.firstRechargeBonusCredits));
+    $('service-description').textContent = offers.length
+      ? offers.map(plan => formatMoney(plan.amountFen) + ' 首充 ' + formatNumber(plan.credits + plan.firstRechargeBonusCredits) + ' 次（常规 ' + formatNumber(plan.credits) + ' 次）').join('；') + '。每个账户共享一次，登录可查资格。'
+      : rows.length ? '登录后查看方案。实际付款和到账状态以服务器核验为准。' : '当前没有可购买的方案。可先使用客户端的自有翻译服务；积分翻译是否开放以客户端服务状态为准。';
   }
 
   async function loadDashboard() {
@@ -421,8 +452,10 @@
     const results = await Promise.allSettled([api('/account'), api('/ledger'), api('/orders'), api('/plans', { authenticated: false })]);
     if (current !== generation) return false;
     let failures = 0;
+    firstRechargeEligible = null;
     if (results[0].status === 'fulfilled') {
       const account = results[0].value;
+      if (typeof account.firstRechargeEligible === 'boolean') firstRechargeEligible = account.firstRechargeEligible;
       $('account-username').textContent = account.username;
       $('available-balance').textContent = formatNumber(account.balance - account.reserved);
       $('total-balance').textContent = formatNumber(account.balance);
@@ -441,14 +474,18 @@
         else if (fresh) createdOrders.set(planId, fresh);
       }
       const checkout = orders.find(item => item.id === checkoutOrderId);
-      if (checkout) resolveCheckout(checkout);
+      if (checkout?.status === 'pending') showCheckout(checkout, false);
+      else if (checkout) resolveCheckout(checkout);
       renderOrders(orders);
     } else { failures++; tableMessage('orders-body', '订单读取失败，请点击「刷新账户」重试。'); }
     if (results[3].status === 'fulfilled' && Array.isArray(results[3].value)) {
       plans = results[3].value; renderPlans(); updatePlanStatus(plans);
     } else {
-      failures++; $('plans').replaceChildren(node('p', '充值方案暂时读取失败，请刷新账户后重试。', 'empty-state'));
+      failures++; plans = []; closeCoupon(); $('first-recharge-status').hidden = true;
+      $('plans').replaceChildren(node('p', '充值方案暂时读取失败，请刷新账户后重试。', 'empty-state'));
     }
+    if (confirmedQuote && firstRechargeEligible !== true && hasBonus(confirmedQuote.firstRechargeBonusCredits))
+      $('quote-credits').textContent = formatNumber(confirmedQuote.credits);
     message(failures ? '部分信息读取失败，请检查网络后刷新。' : '账户信息已更新。', failures ? 'error' : 'success');
     return failures === 0;
   }
@@ -514,8 +551,10 @@
         || !Number.isSafeInteger(quote.originalAmountFen) || !Number.isSafeInteger(quote.discountFen) || !Number.isSafeInteger(quote.amountFen)
         || quote.discountFen < 1 || quote.amountFen < 1 || quote.originalAmountFen - quote.discountFen !== quote.amountFen)
         throw new ApiError('报价无效。');
-      confirmedQuote = {planId:plan.id, couponCode, credits:quote.credits, originalAmountFen:quote.originalAmountFen, discountFen:quote.discountFen, amountFen:quote.amountFen};
-      $('quote-credits').textContent = formatNumber(quote.credits);
+      confirmedQuote = {planId:plan.id, couponCode, credits:quote.credits, firstRechargeBonusCredits:quote.firstRechargeBonusCredits,
+        originalAmountFen:quote.originalAmountFen, discountFen:quote.discountFen, amountFen:quote.amountFen};
+      $('quote-credits').textContent = firstRechargeEligible !== false && hasBonus(quote.firstRechargeBonusCredits)
+        ? previewQuantity(quote.credits, quote.firstRechargeBonusCredits) : formatNumber(quote.credits);
       $('quote-original').textContent = formatMoney(quote.originalAmountFen);
       $('quote-discount').textContent = '−' + formatMoney(quote.discountFen);
       $('quote-total').textContent = formatMoney(quote.amountFen);
@@ -549,22 +588,24 @@
       return createOrder(couponPlan, confirmedQuote);
   });
 
-  function showCheckout(order) {
+  function showCheckout(order, focus = true) {
     checkoutOrderId = order.id;
     const panel = $('checkout-message'); panel.replaceChildren(); panel.hidden = false;
     panel.dataset.tone = 'info';
     if (order.status !== 'pending') { resolveCheckout(order); return; }
-    panel.append(node('p', '订单已创建，' + formatNumber(order.credits) + ' 积分，应付 ' + formatMoney(order.amountFen) + '。'));
+    panel.append(node('p', '订单已创建，应付 ' + formatMoney(order.amountFen) + '。' + orderQuantity(order) + '。'));
+    if (firstRechargeEligible === true && hasBonus(order.potentialFirstRechargeBonusCredits))
+      panel.append(node('p', '爱发电套餐名可能只显示常规积分。首充赠分由本站在核验到账时发放。', 'form-hint'));
     const link = paymentLink(order.payUrl);
     if (link) panel.append(link, node('p', '付款后回到这里，在订单列表点击「核验到账」。请勿重复付款。', 'form-hint'));
     else panel.append(node('p', '付款入口目前不可用，请稍后刷新订单。', 'form-hint'));
-    panel.tabIndex = -1; panel.focus();
+    if (focus) { panel.tabIndex = -1; panel.focus(); }
   }
 
   function resolveCheckout(order) {
     if (order.id !== checkoutOrderId || order.status === 'pending') return;
     const panel = $('checkout-message');
-    panel.replaceChildren(node('p', order.status === 'paid' ? '这笔订单已到账，无需再次付款。' : '这笔订单的状态已更新，请查看下方订单记录。'));
+    panel.replaceChildren(node('p', order.status === 'paid' ? '这笔订单已完成，实付 ' + formatMoney(order.amountFen) + '，' + orderQuantity(order) + '。' : '这笔订单的状态已更新，请查看下方订单记录。'));
     panel.dataset.tone = order.status === 'paid' ? 'success' : 'info';
   }
 

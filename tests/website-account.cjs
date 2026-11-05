@@ -95,9 +95,65 @@ async function main() {
   check(api.getToken() === '', '401 revokes in-memory session');
   check(element('dashboard').hidden && !element('auth-section').hidden, '401 returns to sign-in');
   await couponTests();
+  await firstRechargeTests();
   await redemptionTests();
   await registrationTests();
   console.log('PASS ' + assertions + ' website account security and workflow assertions');
+}
+
+async function firstRechargeTests() {
+  api.clearSession(); api.setSession('b'.repeat(43));
+  const plans = [
+    {id:'credits-200',name:'200积分',credits:200,amountFen:500,firstRechargeBonusCredits:100},
+    {id:'credits-500',name:'500积分',credits:500,amountFen:1000,firstRechargeBonusCredits:100},
+    {id:'custom',name:'自定义套餐',credits:40,amountFen:100,firstRechargeBonusCredits:20}
+  ];
+  const pending = {id:crypto.randomUUID().replaceAll('-',''), planId:plans[0].id, credits:200, status:'pending', amountFen:500,
+    creditedCredits:null, firstRechargeBonusCredits:0, potentialFirstRechargeBonusCredits:100, payUrl:'https://afdian.com/order/create?custom_order_id=example'};
+  let eligible = true;
+  let orders = [pending];
+  let accountOffline = false;
+  transport = async (url, opts) => {
+    if (url === '/v1/plans') return response(plans);
+    if (url === '/v1/account') return accountOffline ? response({},503) : response({username:'test',balance:73,reserved:0,firstRechargeEligible:eligible});
+    if (url === '/v1/ledger') return response([]);
+    if (url === '/v1/orders') return response(opts.method === 'POST' ? pending : orders);
+    if (url === '/v1/checkout/quote') return response({planId:plans[0].id,credits:200,amountFen:350,originalAmountFen:500,discountFen:150,firstRechargeBonusCredits:eligible ? 100 : 0});
+    throw new Error('Unexpected first recharge path');
+  };
+  const texts = id => walk(element(id)).map(e => e.textContent).join(' ');
+  const planTitles = () => walk(element('plans')).filter(e => e.tagName === 'h4').map(e => e.textContent).join('|');
+  await api.loadDashboard();
+  check(planTitles() === '5 元首充|10 元首充|自定义套餐', 'Eligible plan headings replace only base-quantity names; a custom name remains');
+  check(texts('plans').includes('¥5.00 · 若本单首笔到账，共 300 积分（常规 200 + 首充赠 100）')
+    && texts('plans').includes('¥10.00 · 若本单首笔到账，共 600 积分（常规 500 + 首充赠 100）'), 'Both offers show the potential total and their regular quantities with a true account eligibility');
+  check(texts('service-description').includes('常规 200 次') && texts('service-description').includes('常规 500 次') &&
+    texts('first-recharge-status').includes('共用一次'), 'The account explains one first payment across tiers, independent of an existing positive balance');
+  await api.createOrder(plans[0]);
+  check(texts('checkout-message').includes('若本单首笔到账，共 300') && texts('checkout-message').includes('应付 ¥5.00') &&
+    texts('checkout-message').includes('爱发电套餐名可能只显示常规积分'), 'Creating an eligible pending order displays a conditional bonus, amount, and local bonus attribution');
+  const coupon = walk(element('plans')).find(e=>e.textContent==='使用优惠码');
+  coupon.events.click(); element('coupon-code').value='TEST'; await element('coupon-form').events.submit({preventDefault(){}});
+  check(texts('quote-credits').includes('300 积分（常规 200 + 首充赠 100）') && texts('quote-total').includes('¥3.50'),
+    'A first recharge coupon shows its own discounted amount and independently quoted potential bonus');
+  const paid = {...pending,id:crypto.randomUUID().replaceAll('-',''),status:'paid',credits:500,amountFen:1000,creditedCredits:600,firstRechargeBonusCredits:100};
+  eligible=false; orders=[pending,paid]; await api.loadDashboard();
+  check(planTitles() === '200积分|500积分|自定义套餐', 'Regular customers see the original plan names');
+  check(!texts('plans').includes('首充赠') && texts('first-recharge-status').includes('已有充值记录') && texts('quote-credits') === '200',
+    'After another order settles, neither the plan nor a previously open quote promises the first bonus');
+  check(texts('orders-body').includes('到账 600 积分（含首充赠 100）') && texts('orders-body').includes('实付 ¥10.00') &&
+    !texts('orders-body').includes('若本单首笔到账'), 'Paid history shows what actually arrived while remaining pending orders revert to base');
+  api.renderOrders([{...paid,creditedCredits:500,firstRechargeBonusCredits:0},{...paid,status:'refunded'}]);
+  check(texts('orders-body').includes('到账 500 积分') && texts('orders-body').includes('原到账 600 积分（含首充赠 100）'),
+    'Ordinary payments and refunded first payments retain their own historic actual amounts');
+  eligible=true; await api.loadDashboard(); accountOffline=true; await api.loadDashboard();
+  check(texts('first-recharge-status').includes('暂未确认') && !texts('plans').includes('首充赠') &&
+    !texts('orders-body').includes('若本单首笔到账'), 'A failed account fetch clears stale eligibility and does not derive it from recent orders');
+  api.clearSession();
+  check(element('first-recharge-status').hidden && !texts('first-recharge-status'), 'Sign-out clears account-specific first payment state');
+  const home = fs.readFileSync(path.join(__dirname,'..','website','index.html'),'utf8');
+  check(home.includes('5 元 <span>300 次') && home.includes('10 元 <span>600 次') && home.includes('常规充值 200 次') &&
+    home.includes('常规充值 500 次') && home.includes('每个账户共享一次首充奖励'), 'Public offers disclose both regular and promotional totals and the account-wide limit');
 }
 
 async function couponTests() {

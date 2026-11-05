@@ -144,6 +144,8 @@
 .balance-value { letter-spacing: -.035em; font-variant-numeric: tabular-nums; font-weight: 650; }
 .account-grid { align-items: start; grid-template-columns: minmax(0,1.25fr) minmax(0,.75fr); }
 .plan-card { background: #faf9f6; border-color: var(--line); border-radius: 8px; }
+.first-recharge-status { margin-bottom: 12px; padding: 10px 13px; border-left: 3px solid var(--accent); background: #f3eff8; color: var(--ink); font-size: 14px; }
+.plan-card .plan-quantity { font-weight: 650; color: var(--ink); }
 .plan-card .button + .button { margin-top: 7px; }
 .coupon-panel { margin-top: 18px; padding: 18px; border: 1px solid #d1c9df; border-radius: 10px; background: #f7f5fb; }
 .coupon-panel h4 { margin: 0 0 14px; font-size: 16px; overflow-wrap: anywhere; }

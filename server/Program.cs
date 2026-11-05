@@ -133,7 +133,8 @@ public static class MugonzeiHost
         app.MapPost("/v1/redemptions", (RedeemCodeRequest input, HttpContext context, Store store) =>
             store.RedeemCode(AuthService.UserId(context), input.Code)).RequireRateLimiting("redemption");
         app.MapGet("/v1/plans", () => options.Plans.Where(_ => options.LivePayments || options.MockPayments)
-            .Select(plan => new { plan.Id, plan.Name, plan.Credits, plan.AmountFen }));
+            .Select(plan => new { plan.Id, plan.Name, plan.Credits, plan.AmountFen,
+                firstRechargeBonusCredits = FirstRechargeBonus.ForPlan(plan.Id, plan.Credits, plan.AmountFen) }));
 
         object OrderReply(HttpContext context, OrderRecord order)
         {
@@ -143,12 +144,19 @@ public static class MugonzeiHost
                 if (!PaymentService.IsLoopback(context)) throw new ApiException(403, "loopback_required", "模拟支付仅允许本机访问。");
                 payUrl = context.Request.Scheme + "://" + context.Request.Host + payUrl;
             }
-            return new { order.Id, order.Status, payUrl, order.PlanId, order.Credits, order.OriginalAmountFen, order.DiscountFen, order.AmountFen, order.CreatedAt };
+            // Older clients compare credits against the confirmed package even when retrying a paid order.
+            return new { order.Id, order.Status, payUrl, order.PlanId, credits = order.BaseCredits,
+                order.FirstRechargeBonusCredits, creditedCredits = order.Status == "pending" ? (int?)null : order.Credits,
+                potentialFirstRechargeBonusCredits = FirstRechargeBonus.ForPlan(order.PlanId, order.BaseCredits, order.OriginalAmountFen),
+                order.OriginalAmountFen, order.DiscountFen, order.AmountFen, order.CreatedAt };
         }
-        app.MapPost("/v1/checkout/quote", (CouponQuoteRequest input, HttpContext context, PaymentService payments) =>
+        app.MapPost("/v1/checkout/quote", (CouponQuoteRequest input, HttpContext context, PaymentService payments, Store store) =>
         {
-            _ = AuthService.UserId(context);
-            return payments.Quote(input.PlanId, CouponRequired(input.CouponCode));
+            var userId = AuthService.UserId(context);
+            var quote = payments.Quote(input.PlanId, CouponRequired(input.CouponCode));
+            return new { quote.PlanId, quote.Credits, quote.OriginalAmountFen, quote.DiscountFen, quote.AmountFen,
+                firstRechargeBonusCredits = store.GetAccount(userId).FirstRechargeEligible
+                    ? FirstRechargeBonus.ForPlan(quote.PlanId, quote.Credits, quote.OriginalAmountFen) : 0 };
         }).RequireRateLimiting("coupon-quote");
         // Dedicated route: an older server must return 404 rather than ignore the code and charge full price.
         app.MapPost("/v1/checkout/orders", (CouponOrderRequest input, HttpContext context, PaymentService payments) =>
