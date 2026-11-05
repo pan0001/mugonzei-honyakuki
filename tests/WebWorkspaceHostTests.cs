@@ -18,7 +18,14 @@ internal static class WebWorkspaceHostTests
         {
             await DesktopResponsivenessTests.OnUiThread(async () =>
             {
-                using var form = new MainForm(true, useWebUi: true, webProfileDirectory: profile) {
+                var published = new Uri("https://github.com/pan0001/mugonzei-honyakuki/releases/tag/v90.0.0");
+                var installer = new Uri("https://github.com/pan0001/mugonzei-honyakuki/releases/download/v90.0.0/Mugonzei-Honyakuki-Setup-win-x64-v90.0.0.exe");
+                var check = new TaskCompletionSource<GitHubUpdateResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+                int requests = 0;
+                Uri? opened = null;
+                using var form = new MainForm(true, useWebUi: true, webProfileDirectory: profile,
+                    checkForUpdates: ct => { requests++; return check.Task.WaitAsync(ct); },
+                    openUpdateLink: uri => opened = uri) {
                     ShowInTaskbar = false, StartPosition = FormStartPosition.Manual,
                     Location = new Point(-15000, -15000), Size = new Size(1130, 760)
                 };
@@ -29,6 +36,17 @@ internal static class WebWorkspaceHostTests
                 Task<string> Js(string script) => core.ExecuteScriptAsync(script);
                 Task WaitJs(string script) => Until(async () => await Js(script) == "true");
                 await WaitJs("document.querySelector('#activeMode')?.textContent.includes('桌面') === true");
+                if (requests != 0) throw new Exception("Update checks should only run on request");
+                await Js("document.querySelector('#updateEntry').click()");
+                await Until(() => Task.FromResult(requests == 1));
+                await Js("window.chrome.webview.postMessage({type:'action',action:'checkUpdate'})");
+                await WaitJs("document.querySelector('#updatePanel').innerText.includes('GitHub')");
+                check.SetResult(new GitHubUpdateResult(true, GitHubUpdateChecker.CurrentVersion, "90.0.0", published, installer));
+                await WaitJs("document.querySelector('#updateDownload').getClientRects().length > 0");
+                if (requests != 1 || opened is not null) throw new Exception("An update check repeated or opened a download without a click");
+                await Js("document.querySelector('#updateDownload').click()");
+                await Until(() => Task.FromResult(opened == installer));
+                await Js("document.querySelector('#updateClose').click()");
                 await Js("document.querySelector('input[name=mode][value=Desktop]').click()");
                 await Until(() => Task.FromResult(form.ReadSettingsDraft().RuntimeMode == "Desktop"));
                 await Js("window.sameControl = document.querySelector('input[name=mode][value=Desktop]'); window.sameControl.focus()");

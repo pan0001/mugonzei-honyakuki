@@ -10,7 +10,7 @@
   ]);
   const saved = Object.create(null);
   const edits = new Map();
-  const state = {mode: "Auto", effectiveMode: "Desktop", pages: 0, page: 0};
+  const state = {mode: "Auto", effectiveMode: "Desktop", pages: 0, page: 0, updateState: "idle"};
   const serviceTabs = all("[data-service-tab]");
   let requestedMode;
   let saving = false;
@@ -240,6 +240,40 @@
     presets.forEach((item, index) => select.add(new Option(item.name, String(index))));
     display(byId("presetField"), presets.length > 0);
   }
+  function renderUpdate() {
+    const available = state.updateState === "available";
+    const checking = state.updateState === "checking";
+    const status = {
+      idle: "检查是否有新版本可用。",
+      checking: "正在检查更新…",
+      current: "已是最新版本。",
+      available: state.updateVersion ? "发现新版本 " + state.updateVersion : "发现新版本。",
+      error: "更新检查失败。"
+    }[state.updateState] || "检查是否有新版本可用。";
+    const entry = byId("updateEntry");
+    entry.dataset.available = String(available);
+    entry.setAttribute("aria-label", available ? "检查更新，有新版本可用" : "检查更新");
+    text(entry.querySelector(".update-entry-full"), available ? "有新版可用" : "检查更新");
+    text(entry.querySelector(".update-entry-short"), available ? "新版本" : "更新");
+    optionalText("updateEntryVersion", state.appVersion);
+    optionalText("updateCurrentVersion", state.appVersion ? "当前版本 " + state.appVersion : "");
+    byId("updatePanel").dataset.state = state.updateState;
+    text(byId("updateStatus"), status);
+    optionalText("updateDetail", state.updateMessage !== status ? state.updateMessage : "");
+    text(byId("updateCheck"), checking ? "检查中…" : state.updateState === "error" ? "重试" : state.updateState === "idle" ? "检查更新" : "重新检查");
+    disabled(byId("updateCheck"), checking);
+    const download = byId("updateDownload");
+    text(download, state.updateHasInstaller === false ? "查看发布页" : "下载新版");
+    display(download, available);
+    disabled(download, !available);
+  }
+  function requestUpdateCheck() {
+    if (state.updateState === "checking") return;
+    state.updateState = "checking";
+    state.updateMessage = "";
+    renderUpdate();
+    post({type: "action", action: "checkUpdate"});
+  }
   function updateMessage(event) {
     const message = event.data;
     if (!message || typeof message !== "object") return;
@@ -262,6 +296,7 @@
     // Screenshots can be large. Retain only the current img.src instead of copying the URI into every state snapshot.
     const {preview, settings, presets: incomingPresets, ...small} = message;
     Object.assign(state, small);
+    if (["appVersion", "updateState", "updateMessage", "updateVersion", "updateHasInstaller"].some(key => Object.hasOwn(small, key))) renderUpdate();
     if (small.mode === requestedMode) requestedMode = undefined;
     if (Object.hasOwn(small, "hasApiKey")) saved.hasApiKey = small.hasApiKey === true;
     if (settings) applySettings(settings);
@@ -317,10 +352,15 @@
   document.addEventListener("click", event => {
     const button = event.target.closest("button");
     if (!button || button.disabled) return;
+    if (button.id === "updateEntry") {
+      if (state.updateState === "idle" && !byId("updatePanel").matches(":popover-open")) requestUpdateCheck();
+      return;
+    }
     if (button.dataset.page) { go(button.dataset.page); return; }
     if (button.dataset.serviceTab) { showServiceTab(button.dataset.serviceTab); return; }
     const action = button.dataset.action;
     if (!action) return;
+    if (action === "checkUpdate") { requestUpdateCheck(); return; }
     const hasDraft = edits.size > 0;
     if (hasDraft && ["translate", "recognize"].includes(action)) {
       showStatus("请先保存或放弃设置修改，再截取画面。", true);

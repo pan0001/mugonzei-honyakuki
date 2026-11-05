@@ -10,6 +10,50 @@ internal sealed partial class MainForm
     private bool webReady, webDirty, needsWebSnapshot;
     private Image? projectedPreview;
     private long thumbnailRevision;
+    private readonly Func<CancellationToken,Task<GitHubUpdateResult>> readRelease;
+    private readonly Action<Uri> openRelease;
+    private CancellationTokenSource? updateCheck;
+    private GitHubUpdateResult? checkedRelease;
+    private string updateState = "idle", updateMessage = "";
+
+    private async Task CheckForUpdateAsync()
+    {
+        if (updateCheck is not null || closing) return;
+        using var request = new CancellationTokenSource();
+        updateCheck = request;
+        checkedRelease = null;
+        updateState = "checking";
+        updateMessage = "正在连接 GitHub…";
+        PushWorkspace();
+        try
+        {
+            var release = await readRelease(request.Token);
+            if (closing || request.IsCancellationRequested) return;
+            checkedRelease = release;
+            updateState = release.UpdateAvailable ? "available" : "current";
+            updateMessage = !release.UpdateAvailable ? "" : release.InstallerUrl is null
+                ? "此版本没有可直接下载的 Windows 安装程序，请查看 GitHub 发布页。"
+                : "点击下载将在默认浏览器中打开 Windows 安装程序的下载地址。";
+        }
+        catch (OperationCanceledException) when (closing || request.IsCancellationRequested) { }
+        catch (Exception e) when (e is InvalidOperationException or HttpRequestException or OperationCanceledException)
+        {
+            updateState = "error";
+            updateMessage = e is InvalidOperationException ? e.Message : "暂时无法连接 GitHub，请重试。";
+        }
+        finally { updateCheck = null; QueueWebUpdate(); }
+    }
+
+    private void OpenCheckedUpdate()
+    {
+        // Only use destinations from the native check. The web message never supplies a URL.
+        if (closing || checkedRelease is not { UpdateAvailable: true } r) return;
+        try { openRelease(r.InstallerUrl ?? r.ReleaseUrl); }
+        catch (Exception e) when (e is System.ComponentModel.Win32Exception or InvalidOperationException)
+        {
+            updateMessage = "无法打开默认浏览器，请检查浏览器设置后重试。";
+        }
+    }
     private readonly Dictionary<string,object?> sent = [];
     private string ReadWebAccountName()
     {
@@ -70,6 +114,9 @@ internal sealed partial class MainForm
         Put("localOcrStatus", localOcrStatus.Text); Put("creditNote", creditBalanceNote.Text);
         Put("testingApi", apiVisionCheck is not null); Put("testingGoogle", googleTranslationCheck is not null);
         Put("testingCodex", loginCheck is not null);
+        Put("appVersion", GitHubUpdateChecker.CurrentVersion); Put("updateState", updateState);
+        Put("updateMessage", updateMessage); Put("updateVersion", checkedRelease?.LatestVersion);
+        Put("updateHasInstaller", checkedRelease?.InstallerUrl is not null);
         if (full)
         {
             delta["settings"] = WebSettingsPatch.Public(settings);
@@ -136,6 +183,8 @@ internal sealed partial class MainForm
                             case "recognize": await CaptureAndTranslate(true); break;
                             case "cancel": CancelAllWork(); break;
                             case "saveScreenshot": SaveCurrentScreenshot(); break;
+                            case "checkUpdate": await CheckForUpdateAsync(); break;
+                            case "downloadUpdate": OpenCheckedUpdate(); break;
                             case "previous": ChangePage(-1); break;
                             case "next": ChangePage(1); break;
                             case "hideSubtitle": HideOverlay(); break;

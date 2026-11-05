@@ -13,6 +13,17 @@ if (args.Length == 2 && args[0] == "--fake-local-ocr")
 
 try
 {
+    if (args.Contains("--github-update-live"))
+    {
+        var live = await GitHubUpdateChecker.CheckAsync(CancellationToken.None);
+        Console.WriteLine($"GitHub: installed={live.CurrentVersion}, published={live.LatestVersion}, updateAvailable={live.UpdateAvailable}");
+        return;
+    }
+    if (args.Contains("--update-regression"))
+    {
+        await GitHubUpdateTests.RunAsync();
+        return;
+    }
     if (args.Contains("--web-workspace-smoke"))
     {
         await WebWorkspaceHostTests.RunAsync();
@@ -84,6 +95,7 @@ try
         Console.WriteLine("PASS focused hold animation, native presentation state, cancellation and input continuity regression");
         return;
     }
+    await GitHubUpdateTests.RunAsync();
     await WebSetupFlowTests.Run();
     SetupWizardTests.Run();
     await CreditServiceTests.RunAsync();

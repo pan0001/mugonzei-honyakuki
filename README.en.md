@@ -8,7 +8,7 @@
 
 Translate handwritten or printed text on a Windows desktop or in SteamVR, with subtitles near the bottom of the monitor or headset view.
 
-[Windows x64 installer · v0.2.5-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.5-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.5-preview.exe) · [Portable ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.5-preview/Mugonzei-Honyakuki-win-x64-v0.2.5-preview.zip) · [Report an issue](https://github.com/pan0001/mugonzei-honyakuki/issues)
+[Windows x64 installer · v0.2.6-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.6-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.6-preview.exe) · [Portable ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.6-preview/Mugonzei-Honyakuki-win-x64-v0.2.6-preview.zip) · [Report an issue](https://github.com/pan0001/mugonzei-honyakuki/issues)
 
 **Example: translating a station sign into Simplified Chinese**
 
@@ -56,6 +56,8 @@ Open Account & AI Services → Preferences to change providers or rerun setup. E
 If `VCRUNTIME140.dll` or `MSVCP140.dll` is missing, install Microsoft's [Visual C++ x64 Redistributable](https://aka.ms/vs/17/release/vc_redist.x64.exe). For installing the runtime required by Google webpage mode, see [Microsoft WebView2](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution).
 
 ## Upgrading and incremental updates
+
+If you use v0.2.5-preview or earlier, download v0.2.6-preview manually from the links at the top of this page. Starting with v0.2.6-preview, select 「检查更新」 (Check for updates) at the bottom of the workspace sidebar. In a narrow window, the button is on the right of the top navigation bar. The app queries GitHub only when you click and shows your installed version and the latest release. If an update is available, select 「下载新版」 (Download update) to download the official installer in your default browser. If the release has no matching installer, select 「查看发布页」 (View release) for other downloads.
 
 Exit the app before upgrading. Run the new installer to update the existing installation. For the portable version, extract the entire new ZIP to a new folder and run `SteamVrTranslator.exe` from there. Both versions reuse the settings and saved keys in `%LOCALAPPDATA%/SteamVrTranslator/`.
 

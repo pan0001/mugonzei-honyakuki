@@ -22,6 +22,8 @@
     <symbol id="i-scan" viewBox="0 0 24 24"><path d="M5 7h3l2-3h4l2 3h3a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2Z"/><circle cx="12" cy="13" r="3.3"/></symbol>
     <symbol id="i-text" viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h9"/></symbol>
     <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="13" rx="2"/><path d="M12 17v4m-5 0h10"/></symbol>
+    <symbol id="i-update" viewBox="0 0 24 24"><path d="M20 5v5h-5M4 19v-5h5"/><path d="M5.3 8.5a7.5 7.5 0 0 1 12.4-2.1L20 10M4 14l2.3 3.6a7.5 7.5 0 0 0 12.4-2.1"/></symbol>
+    <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12m0-12L6 18"/></symbol>
   </svg>
   <aside class="rail">
     <div class="brand"><svg viewBox="0 0 36 36" width="34" height="34" aria-hidden="true"><rect x="1" y="1" width="34" height="34" rx="10" fill="#9ae6c4"/><path d="M9 10h18v13H16l-5 4v-4H9z" fill="none" stroke="#112923" stroke-width="2" stroke-linejoin="round"/><path d="M13 15h10m-10 4h6" stroke="#112923" stroke-width="1.8" stroke-linecap="round"/></svg><span>无言势翻译器</span></div>
@@ -31,6 +33,12 @@
       <button type="button" data-page="capture"><svg><use href="#i-focus"/></svg>截图与按键</button>
       <button type="button" data-page="subtitles"><svg><use href="#i-captions"/></svg>字幕显示</button>
     </nav>
+    <div class="rail-update">
+      <button type="button" id="updateEntry" popovertarget="updatePanel" aria-label="检查更新">
+        <svg aria-hidden="true"><use href="#i-update"/></svg>
+        <span><span class="update-entry-full">检查更新</span><span class="update-entry-short" aria-hidden="true">更新</span><small id="updateEntryVersion" hidden></small></span>
+      </button>
+    </div>
   </aside>
   <main>
     <header class="page-head">
@@ -143,5 +151,13 @@
       <div class="status-line"><span class="dot" aria-hidden="true"></span><span id="status" role="status">正在连接工作台…</span></div>
     </footer>
   </main>
+  <section class="update-panel" id="updatePanel" popover="auto" role="dialog" aria-labelledby="updateTitle">
+    <div class="update-head"><h2 id="updateTitle">客户端更新</h2><button type="button" class="quiet icon-button" id="updateClose" popovertarget="updatePanel" popovertargetaction="hide" aria-label="关闭更新面板"><svg aria-hidden="true"><use href="#i-close"/></svg></button></div>
+    <p id="updateCurrentVersion" class="update-version" hidden></p>
+    <div class="update-feedback" role="status" aria-live="polite" aria-atomic="true">
+      <p id="updateStatus">检查是否有新版本可用。</p><p id="updateDetail" class="hint" hidden></p>
+    </div>
+    <div class="update-actions"><button type="button" class="primary" id="updateDownload" data-action="downloadUpdate" disabled hidden>下载新版</button><button type="button" id="updateCheck" data-action="checkUpdate">检查更新</button></div>
+  </section>
 </body>
 </html>

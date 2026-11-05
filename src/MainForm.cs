@@ -84,9 +84,12 @@ internal sealed partial class MainForm : Form
     private bool busy, closing, overlayVisible, disposedServices, setupDialogOpen;
     private readonly bool demo;
 
-    public MainForm(bool demo, bool useWebUi = false, string? webProfileDirectory = null)
+    public MainForm(bool demo, bool useWebUi = false, string? webProfileDirectory = null,
+        Func<CancellationToken, Task<GitHubUpdateResult>>? checkForUpdates = null, Action<Uri>? openUpdateLink = null)
     {
         this.demo = demo;
+        readRelease = checkForUpdates ?? GitHubUpdateChecker.CheckAsync;
+        openRelease = openUpdateLink ?? (uri => Process.Start(new ProcessStartInfo(uri.AbsoluteUri) { UseShellExecute = true })?.Dispose());
         runtimeMonitor = new RuntimeModeMonitor(
             demo ? () => Task.FromResult(0) : () => Task.Run(SteamVrPresence.ReadServerPid),
             () => vr.IsConnected, vr.Connect, vr.Disconnect);
@@ -1099,7 +1102,7 @@ internal sealed partial class MainForm : Form
 
     private void OnClosing(object? sender, FormClosingEventArgs e)
     {
-        closing = true; RequestCancellation(loginCheck); RequestCancellation(apiVisionCheck); RequestCancellation(googleTranslationCheck); pollTimer.Stop(); hotkeys?.Dispose(); tray.Visible = false;
+        closing = true; RequestCancellation(updateCheck); RequestCancellation(loginCheck); RequestCancellation(apiVisionCheck); RequestCancellation(googleTranslationCheck); pollTimer.Stop(); hotkeys?.Dispose(); tray.Visible = false;
         bool capturingSelection = selectionCapture is not null;
         CancelSelectionCapture();
         captureRequests.CancelPending();

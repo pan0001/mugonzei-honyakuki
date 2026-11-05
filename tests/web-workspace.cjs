@@ -19,6 +19,7 @@ if (!executable) throw new Error("Set CHROMIUM_PATH to an installed Edge or Chro
 
 const fixture = {
   type: "state", mode: "Auto", effectiveMode: "Desktop", status: "就绪", source: "", translation: "", accountLoggedIn:false, accountUsername:"",
+  appVersion: "0.2.5-preview", updateState: "idle", updateMessage: "", updateVersion: "",
   settings: {
     translationBackend: "OpenAI", processingMode: "Handwriting", targetLanguage: "简体中文",
     creditServerUrl: "https://test.invalid", apiBaseUrl: "https://model.invalid/v1",
@@ -157,6 +158,30 @@ async function main() {
     assert.deepEqual(await run("[el('cancelTask').disabled,el('saveScreenshot').disabled,el('pageTools').hidden]"), [true,true,true]);
     assert.deepEqual(await run("[el('previewEmpty').offsetWidth>0,el('triggerKey').textContent,el('triggerHint').textContent,el('source').textContent]"), [true,"Ctrl+Alt+T","截取当前桌面","这里显示从截图中读到的文字。"]);
     assert.ok(await run("el('cancelTask').title && el('saveScreenshot').title"), "Disabled capture actions explain when they become available");
+    assert.equal(await run("sent.some(m=>['checkUpdate','downloadUpdate'].includes(m.action))"), false, "Opening the workspace does not check or download updates");
+    await run("el('updateEntry').click()");
+    assert.deepEqual(await run("sent.at(-1)"), {type:"action",action:"checkUpdate"});
+    assert.deepEqual(await run("[el('updatePanel').matches(':popover-open'),el('updateCurrentVersion').textContent,el('updateCheck').disabled,el('updateDownload').hidden]"),
+      [true,"当前版本 0.2.5-preview",true,true]);
+    await run("send({type:'state',updateState:'checking',updateMessage:'正在获取发布信息'});el('updateCheck').click();el('updateDownload').click()");
+    assert.equal(await run("sent.filter(m=>m.action==='checkUpdate').length"), 1);
+    await run("send({type:'state',updateState:'current',updateMessage:''})");
+    assert.deepEqual(await run("[el('updateStatus').textContent,el('updateCheck').disabled,el('updateDownload').hidden]"), ["已是最新版本。",false,true]);
+    await run("el('updateCheck').click();send({type:'state',updateState:'error',updateMessage:'网络错误 <img src=x>'})");
+    assert.deepEqual(await run("[el('updateCheck').textContent,el('updateDetail').textContent,el('updateDetail').children.length,el('updateDownload').hidden]"),
+      ["重试","网络错误 <img src=x>",0,true]);
+    await run("el('updateCheck').click();send({type:'state',updateState:'available',updateVersion:'0.2.6-preview',updateMessage:'',updateHasInstaller:true})");
+    assert.deepEqual(await run("[el('updateStatus').textContent,el('updateDownload').hidden,el('updateDownload').disabled,el('updateDownload').textContent]"),
+      ["发现新版本 0.2.6-preview",false,false,"下载新版"]);
+    assert.equal(await run("sent.filter(m=>m.action==='downloadUpdate').length"), 0, "Announcing an update cannot launch a download");
+    await run("el('updateDownload').click()");
+    assert.deepEqual(await run("sent.at(-1)"), {type:"action",action:"downloadUpdate"});
+    await run("send({type:'state',updateHasInstaller:false})");
+    assert.equal(await run("el('updateDownload').textContent"), "查看发布页");
+    assert.equal(await run("sent.filter(m=>m.action==='downloadUpdate').length"), 1);
+    await run("el('updateDownload').click();el('updateClose').click()");
+    assert.deepEqual(await run("sent.at(-1)"), {type:"action",action:"downloadUpdate"});
+    assert.equal(await run("el('updatePanel').matches(':popover-open')"), false);
     await run("send({type:'state',effectiveMode:'SteamVR',settings:{controllerEnabled:true,spatialSelectionEnabled:false}})");
     assert.equal(await run("el('triggerKey').textContent"), "左 X");
     await run("send({type:'state',effectiveMode:'Desktop',settings:{hotkey:'F8'}})");
@@ -184,6 +209,9 @@ async function main() {
     await call("Input.dispatchKeyEvent", {type:"keyUp", key:"Escape",code:"Escape",windowsVirtualKeyCode:27});
     await run("edit('apiModel','draft'); edit('apiKey','synthetic-placeholder'); send({type:'state',settings:" + JSON.stringify(fixture.settings) + "})");
     assert.deepEqual(await run("[field('apiModel').value,field('apiKey').value,sent.filter(m=>m.type==='dirty'&&m.dirty).length]"), ["draft","synthetic-placeholder",1]);
+    await run("el('updateEntry').click();el('updateCheck').click();el('updateClose').click()");
+    assert.deepEqual(await run("sent.at(-1)"), {type:"action",action:"checkUpdate"}, "Checking an update never sends the settings draft");
+    await run("send({type:'state',updateState:'current',updateVersion:'',updateMessage:''})");
     await run("edit('apiBaseUrl','https://different.invalid/v1'); el('testApi').click()");
     assert.deepEqual(await run("sent.at(-1)"), {type:"action",action:"testApi",settings:{apiModel:"draft",apiBaseUrl:"https://different.invalid/v1"}});
     assert.equal(await run("field('apiKey').value"), "");
@@ -209,6 +237,16 @@ async function main() {
     assert.equal(await run("el('pageTools').hidden"), false);
     await run("send({type:'state',preview:'https://untrusted.invalid/image.jpg'})");
     assert.equal(await run("el('previewImage').hasAttribute('src')"), false);
+    for (const width of [1150, 740, 390, 320]) {
+      await viewport(width, 700);
+      await run("el('updateEntry').click()");
+      assert.ok(await run("['updateEntry','updatePanel','updateCheck'].every(id=>{const r=el(id).getBoundingClientRect();return r.width>0&&r.height>0&&r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight;})"),
+        "The update entry and panel fit at " + width + "px");
+      assert.ok(await run("el('updateEntry').innerText.trim().includes('更新')"));
+      await call("Input.dispatchKeyEvent", {type:"keyDown",key:"Escape",code:"Escape",windowsVirtualKeyCode:27});
+      await call("Input.dispatchKeyEvent", {type:"keyUp",key:"Escape",code:"Escape",windowsVirtualKeyCode:27});
+      assert.equal(await run("el('updatePanel').matches(':popover-open')"), false, "Escape closes the update panel");
+    }
     for (const width of [1280, 820, 520, 375]) {
       await viewport(width, 730);
       for (const page of ["workspace","services","capture","subtitles"]) {
@@ -223,7 +261,7 @@ async function main() {
       }
     }
     assert.deepEqual(await run("appErrors"), []);
-    console.log("PASS embedded workspace: live Chromium retains focused controls and drafts, validates bridge actions, protects API keys, renders four responsive views");
+    console.log("PASS embedded workspace: responsive navigation, drafts, protected API keys, translation controls and manual update states/actions");
     if (process.env.MUGONZEI_SCREENSHOT_DIR) {
       await viewport(1150, 750);
       const out = path.resolve(process.env.MUGONZEI_SCREENSHOT_DIR);
@@ -240,6 +278,10 @@ async function main() {
       await take("workspace");
       await run("showPage('services');el('loginTab').click();send({type:'state',accountLoggedIn:false,accountUsername:'',status:'就绪'})");
       await take("services");
+      await run("showPage('workspace');send({type:'state',updateState:'available',updateVersion:'0.2.6-preview',updateHasInstaller:true,updateMessage:''});el('updateEntry').click()");
+      await take("update-available");
+      await viewport(320, 700);
+      await take("update-available-narrow");
     }
     await call("Browser.close").catch(() => {});
   } finally {
