@@ -8,7 +8,7 @@
 
 在 Windows 桌面或 SteamVR 中截取手写和印刷文字，在屏幕或头显下方阅读翻译字幕。
 
-[Windows x64 安装程序 · v0.2.9-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.9-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.9-preview.exe) · [便携 ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.9-preview/Mugonzei-Honyakuki-win-x64-v0.2.9-preview.zip) · [反馈问题](https://github.com/pan0001/mugonzei-honyakuki/issues)
+[Windows x64 安装程序 · v0.2.10-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.10-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.10-preview.exe) · [便携 ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.10-preview/Mugonzei-Honyakuki-win-x64-v0.2.10-preview.zip) · [反馈问题](https://github.com/pan0001/mugonzei-honyakuki/issues)
 
 **工作台示例**
 
@@ -21,7 +21,7 @@
 ## 可以做什么
 
 - **手柄截图**：左手 X 长按 1.5 秒触发；视野下方的圆环显示进度。继续按到 3 秒取消本次任务并隐藏字幕。
-- **字幕叠层**：扁长的半透明字幕条，支持翻页、原文对照及位置、宽度和显示时长调整。
+- **字幕叠层**：扁长的半透明字幕条，桌面和 VR 普通字幕每页最多三行，超出自动分页。支持原文对照及位置、宽度和显示时长调整；在「字幕显示」中点击「测试字幕」可查看三行示例。
 - **AI 手写翻译**：发送一张截图，模型直接返回中、日、英手写文字的译文；想核对字迹时，可以在自备 AI 服务中单独识别原文。
 - **直接识图**：默认优先翻译游戏对白、手写留言、路牌和任务文字；网页或文档则保留正文。识别时会忽略性能监控、快捷键提示、OSC 控件和系统任务栏，并合并重复字幕。
 - **本地 OCR**：Tesseract 印刷文字识别，以及独立的 NDLOCR-Lite 日语识别；识别阶段可在本机完成。

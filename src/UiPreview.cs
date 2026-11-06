@@ -13,7 +13,7 @@ internal sealed class UiSubtitlePreview : Control
         ForeColor = UiTheme.Ink;
         TabStop = false;
         AccessibleName = "字幕布局示意";
-        AccessibleDescription = "下方显示翻译字幕，上方小圆环表示长按进度。这是布局示意，不是实时 VR 画面。";
+        AccessibleDescription = "下方显示三行翻译字幕，上方小圆环表示长按进度。这是布局示意，不是实时 VR 画面。";
     }
 
     protected override void OnPaintBackground(PaintEventArgs e) => e.Graphics.Clear(UiTheme.ParentBackground(this));
@@ -47,8 +47,8 @@ internal sealed class UiSubtitlePreview : Control
                 graphics.DrawLine(gridPen, 0, height * fraction, width, height * fraction);
 
             float subtitleWidth = Math.Max(1, Math.Min(width - 32 * scale, 440 * scale));
-            float subtitleHeight = Math.Min(46 * scale, height * .24f);
-            var subtitle = new RectangleF((width - subtitleWidth) / 2, height * .70f, subtitleWidth, subtitleHeight);
+            float subtitleHeight = Math.Min(76 * scale, height * .40f);
+            var subtitle = new RectangleF((width - subtitleWidth) / 2, height - subtitleHeight - 12 * scale, subtitleWidth, subtitleHeight);
             using var subtitleShape = UiTheme.RoundedRectangle(subtitle, 9 * scale);
             using var subtitleFill = new SolidBrush(Color.FromArgb(228, UiTheme.Card));
             using var subtitleOutline = new Pen(Color.FromArgb(160, UiTheme.Border), scale);
@@ -71,8 +71,14 @@ internal sealed class UiSubtitlePreview : Control
             using var captionFont = new Font("Microsoft YaHei UI", 8, FontStyle.Regular, GraphicsUnit.Point);
             var textFlags = TextFormatFlags.SingleLine | TextFormatFlags.VerticalCenter
                 | TextFormatFlags.NoPrefix | TextFormatFlags.EndEllipsis | TextFormatFlags.PreserveGraphicsClipping;
-            TextRenderer.DrawText(graphics, "欢迎来到这个世界。", subtitleFont,
-                Rectangle.Round(subtitle), UiTheme.Ink, textFlags | TextFormatFlags.HorizontalCenter);
+            string[] sampleLines = ["欢迎来到这个世界。", "字幕最多显示三行。", "超出三行可以翻页。"];
+            float lineHeight = (subtitleHeight - 8 * scale) / sampleLines.Length;
+            for (int line = 0; line < sampleLines.Length; line++)
+            {
+                var lineBounds = new RectangleF(subtitle.Left, subtitle.Top + 4 * scale + line * lineHeight, subtitleWidth, lineHeight);
+                TextRenderer.DrawText(graphics, sampleLines[line], subtitleFont,
+                    Rectangle.Round(lineBounds), UiTheme.Ink, textFlags | TextFormatFlags.HorizontalCenter);
+            }
             var captionBounds = new Rectangle((int)(12 * scale), (int)(10 * scale),
                 Math.Max(0, (int)(width - 26 * scale)), (int)(20 * scale));
             TextRenderer.DrawText(graphics, "布局示意", captionFont, captionBounds,

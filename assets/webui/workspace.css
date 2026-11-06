@@ -139,7 +139,7 @@ details { margin: 13px 0; }
 summary { cursor: pointer; color: #aec7bd; font-size: 13px; padding: 6px 0; }
 details[open] summary { margin-bottom: 5px; }
 .subtitle-preview { min-height: 110px; border-radius: 8px; display: grid; place-items: end center; padding: 18px; background: linear-gradient(150deg,#253b37,#34534a 45%,#223638); margin-bottom: 17px; }
-.subtitle-preview span { display: block; color: white; background: #111a18c9; padding: 5px 25px; border-radius: 5px; }
+.subtitle-preview span { display: block; color: white; background: #111a18c9; padding: 8px 25px; border-radius: 5px; text-align: center; line-height: 1.6; }
 footer { flex: none; background: var(--bg); }
 .status-line { min-height: 39px; padding: 9px clamp(20px,3.2vw,48px); display: flex; gap: 8px; align-items: baseline; color: var(--muted); border-top: 1px solid #293539; font-size: 12px; }
 .dot { flex: none; width: 6px; height: 6px; align-self: baseline; border-radius: 50%; background: #8daaa0; }

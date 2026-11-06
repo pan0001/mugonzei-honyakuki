@@ -8,7 +8,7 @@
 
 Translate handwritten or printed text on a Windows desktop or in SteamVR, with subtitles near the bottom of the monitor or headset view.
 
-[Windows x64 installer · v0.2.9-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.9-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.9-preview.exe) · [Portable ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.9-preview/Mugonzei-Honyakuki-win-x64-v0.2.9-preview.zip) · [Report an issue](https://github.com/pan0001/mugonzei-honyakuki/issues)
+[Windows x64 installer · v0.2.10-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.10-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.10-preview.exe) · [Portable ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.10-preview/Mugonzei-Honyakuki-win-x64-v0.2.10-preview.zip) · [Report an issue](https://github.com/pan0001/mugonzei-honyakuki/issues)
 
 **Example: translating a station sign into Simplified Chinese**
 
@@ -21,7 +21,7 @@ Translate handwritten or printed text on a Windows desktop or in SteamVR, with s
 ## Features
 
 - **Controller capture:** hold the left X button for 1.5 seconds to trigger a capture. A ring below your view shows progress. Continue holding until 3 seconds to cancel the current task and hide the subtitles.
-- **Subtitle overlay:** a wide, low-profile translucent bar with pagination, optional source text, and adjustable position, width, and display duration.
+- **Subtitle overlay:** a wide, translucent bar with up to three lines per page in desktop and ordinary VR subtitle modes. Longer text continues on additional pages. Source text, position, width, and display duration are configurable. Select “Test subtitles” in subtitle settings to see a three-line example.
 - **AI handwriting translation:** send one screenshot to translate Chinese, Japanese or English handwriting directly. With your own AI service, you can also request a separate transcription to check the writing.
 - **Direct image analysis:** game screenshots prioritize dialogue, handwriting, signs and quest text. Web pages and documents keep their main text. The translator asks the model to ignore performance overlays, hotkey hints, OSC controls and the taskbar, and collapses duplicate subtitles.
 - **Local OCR:** Tesseract for printed text and a separate NDLOCR-Lite engine for Japanese recognition. The recognition stage can run locally.

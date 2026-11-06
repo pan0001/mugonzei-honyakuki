@@ -144,8 +144,8 @@
           </section>
           <section id="subtitles" class="page settings" aria-label="字幕显示" hidden>
             <section class="card form-card"><div class="card-head"><h2>字幕预览</h2><div class="small-row"><button type="button" data-action="testSubtitle">测试字幕</button><button type="button" class="quiet" data-action="hideSubtitle">隐藏字幕</button></div></div>
-              <div class="subtitle-preview" aria-hidden="true"><span>欢迎来到这个世界。</span></div>
-              <div class="fields"><label class="field">停留时间（秒）<input data-field="displaySeconds" type="number" min="0" max="300" step="1" required></label><label class="check"><input data-field="showSource" type="checkbox">同时显示原文</label></div><p class="hint">设为 0 秒可持续显示。框选译文将保留在选区。</p>
+              <div class="subtitle-preview" aria-hidden="true"><span>欢迎来到这个世界。<br>字幕最多显示三行。<br>超出三行可以翻页。</span></div>
+              <div class="fields"><label class="field">停留时间（秒）<input data-field="displaySeconds" type="number" min="0" max="300" step="1" required></label><label class="check"><input data-field="showSource" type="checkbox">同时显示原文</label></div><p class="hint">桌面和 VR 普通字幕每页最多三行，超出自动分页。Ctrl + Alt + ← / → 可翻页。设为 0 秒可持续显示。框选译文将保留在选区。</p>
             </section>
             <section class="card form-card" id="vrSubtitleFields"><h2>头显内的位置</h2><div class="fields three">
               <label class="field">宽度（米）<input data-field="overlayWidth" type="number" min="0.3" max="2" step="0.01" required></label>

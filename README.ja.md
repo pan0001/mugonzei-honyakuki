@@ -8,7 +8,7 @@
 
 Windows デスクトップと SteamVR の画面から手書き・印刷文字を読み取り、画面や視界の下部に訳文を表示します。
 
-[Windows x64 インストーラー · v0.2.9-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.9-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.9-preview.exe) · [ポータブル版 ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.9-preview/Mugonzei-Honyakuki-win-x64-v0.2.9-preview.zip) · [不具合を報告](https://github.com/pan0001/mugonzei-honyakuki/issues)
+[Windows x64 インストーラー · v0.2.10-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.10-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.10-preview.exe) · [ポータブル版 ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.10-preview/Mugonzei-Honyakuki-win-x64-v0.2.10-preview.zip) · [不具合を報告](https://github.com/pan0001/mugonzei-honyakuki/issues)
 
 **ワークスペースの表示例**
 
@@ -21,7 +21,7 @@ Windows デスクトップと SteamVR の画面から手書き・印刷文字を
 ## できること
 
 - **コントローラーで撮影**：左手のXボタンを1.5秒長押しすると撮影します。視界の下部にあるリングで進行状況を確認できます。そのまま3秒まで押し続けると、今回の処理をキャンセルして字幕を非表示にします。
-- **字幕オーバーレイ**：横長の半透明字幕バー。ページ切り替え、原文との比較、位置・幅・表示時間の調整に対応しています。
+- **字幕オーバーレイ**：横長の半透明字幕バー。デスクトップと通常の VR 字幕は1ページ最大3行で、それを超える文章は次のページに続きます。原文との比較、位置・幅・表示時間を調整でき、「字幕显示」の「测试字幕」で3行の表示例を確認できます。
 - **AI手書き翻訳**：スクリーンショットを1枚送ると、中国語・日本語・英語の手書き文字の訳文が直接返ります。自分で設定したAIでは、必要に応じて原文だけを別に読み取ることもできます。
 - **画像を直接読み取り**：ゲームでは会話・手書きのメッセージ・看板・クエストの文章を優先します。ウェブページや文書では本文が対象です。性能表示、キー操作のヒント、OSCの操作欄、タスクバーを除外するようモデルに指示し、重複した字幕はまとめます。
 - **ローカルOCR**：Tesseractによる印刷文字認識と、独立したNDLOCR-Liteによる日本語認識を利用できます。認識段階はPC内で処理できます。

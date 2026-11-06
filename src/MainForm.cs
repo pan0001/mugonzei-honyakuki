@@ -1135,8 +1135,8 @@ internal sealed partial class MainForm : Form
     private void ShowDemo()
     {
         if (busy || selectionActive || selectionCapture is not null) return;
-        sourceText.Text = "Welcome to the world!\r\nPress the button to translate what you see.";
-        translatedText.Text = "欢迎来到这个世界！\r\n按下按键，即可翻译眼前的文字。\r\n\r\n这是显示测试，没有调用 AI 服务。";
+        sourceText.Text = "Welcome to the world!\r\nSubtitles show up to three lines per page.\r\nTurn the page to read the remaining text.";
+        translatedText.Text = "欢迎来到这个世界！\r\n字幕每页最多显示三行。\r\n超过三行时，翻页继续阅读。";
         TryAction(() => SetPages(OverlayRenderer.RenderPages(translatedText.Text)));
         SetStatus(ActiveDesktopMode ? "测试文字已显示在桌面字幕中。" :
             vr.IsConnected ? "测试文字已发送到 VR 叠层。" : "桌面示例已显示。连接 SteamVR 后可测试头显中的叠层。");

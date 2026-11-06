@@ -227,7 +227,7 @@ internal sealed partial class MainForm
     private void BuildSubtitleSettings()
     {
         var stack = SettingsPage("字幕显示", 3);
-        var visual = SettingsCard(stack, "视野下方的轻量字幕", "长按时出现进度圆环，翻译后显示半透明字幕条");
+        var visual = SettingsCard(stack, "视野下方的轻量字幕", "桌面和 VR 普通字幕每页最多三行，超出自动分页");
         var sample = new UiSubtitlePreview { Dock = DockStyle.Fill, Height = 200, Margin = Padding.Empty };
         SettingRow(visual, "", sample, fullWidth: true);
         var position = SettingsCard(stack, "位置与停留时间", "调整后保存设置，对下一次字幕生效");
