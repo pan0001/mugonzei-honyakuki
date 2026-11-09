@@ -18,6 +18,17 @@ if (args.Length == 2 && args[0] == "--fake-local-ocr")
 
 try
 {
+    if (args.Contains("--google-search-ai-live"))
+    {
+        await GoogleSearchAiRoutingTests.RunLiveAsync();
+        return;
+    }
+    if (args.Contains("--google-search-ai-regression"))
+    {
+        await GoogleSearchAiRoutingTests.RunAsync();
+        await GoogleSearchAiWebClientTests.RunAsync();
+        return;
+    }
     if (args.Contains("--vision-content-regression"))
     {
         await HandwritingRecognitionTests.RunAsync();
@@ -130,6 +141,8 @@ try
     await TranslationTests.RunAsync();
     await GoogleTranslateTests.RunAsync();
     await GoogleTranslateWebTests.RunAsync();
+    await GoogleSearchAiRoutingTests.RunAsync();
+    await GoogleSearchAiWebClientTests.RunAsync();
     GoogleTranslateUiTests.Run();
     RecognitionModeUiTests.Run();
     Console.WriteLine("PASS translation HTTP + settings tests");

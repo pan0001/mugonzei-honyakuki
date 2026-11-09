@@ -4,7 +4,7 @@ namespace SteamVrTranslator;
 
 internal sealed partial class MainForm
 {
-    private UiCard codexSettingsCard = null!, apiSettingsCard = null!, localOcrSettingsCard = null!, googleSettingsCard = null!;
+    private UiCard codexSettingsCard = null!, apiSettingsCard = null!, localOcrSettingsCard = null!, googleSettingsCard = null!, googleSearchAiSettingsCard = null!;
     private readonly List<UiButton> navigation = [];
     private readonly Label pageTitle = new() { AutoSize = true };
     private readonly Label pageDescription = new() { AutoSize = true };
@@ -169,6 +169,8 @@ internal sealed partial class MainForm
         SettingRow(googleSettingsCard, "网页操作", googleActions);
         SettingRow(googleSettingsCard, "", Note("只发送固定文字 Hello world.，不截取游戏画面。"));
         SettingRow(googleSettingsCard, "", googleTestResult);
+        googleSearchAiSettingsCard = SettingsCard(stack, "Google 搜索 AI 模式（实验性）", "发送截图，获取目标语言的译文");
+        SettingRow(googleSearchAiSettingsCard, "网页操作", showGoogleSearchAiBrowser);
         codexSettingsCard = SettingsCard(stack, "本机 Codex", "使用电脑上已登录的 Codex 账号");
         SettingRow(codexSettingsCard, "程序路径", codexPath);
         SettingRow(codexSettingsCard, "模型", codexModel);
@@ -297,8 +299,12 @@ internal sealed partial class MainForm
         endpoint.PlaceholderText = "https://你的服务/v1 或 http://localhost:11434/v1";
         model.PlaceholderText = "填写服务商支持的视觉模型名称";
         apiKey.PlaceholderText = "本机 Ollama 可留空；保存时使用 Windows 加密";
-        backend.Items.AddRange(["本机 Codex", "其他 AI API", "Google Translate（后台网页）", "积分服务（爱发电）"]);
-        backend.SelectedIndexChanged += (_, _) => UpdateBackendControls();
+        backend.Items.AddRange(["本机 Codex", "其他 AI API", "Google Translate（后台网页）", "积分服务（爱发电）", "Google 搜索 AI 模式（实验性）"]);
+        backend.SelectedIndexChanged += (_, _) =>
+        {
+            if (backend.SelectedIndex == 2 && processingMode.SelectedIndex is 1 or 2) processingMode.SelectedIndex = 0;
+            UpdateBackendControls();
+        };
         processingMode.Items.AddRange(["本地OCR（不推荐）", "直接发送截图给模型", "手写截图直译（AI）", "本地日语手写 OCR → 翻译"]);
         processingMode.SelectedIndexChanged += (_, _) => UpdateBackendControls();
         codexPath.PlaceholderText = "留空自动查找，或填写 codex.exe 的完整路径";
@@ -312,6 +318,7 @@ internal sealed partial class MainForm
         checkApiVision.Click += async (_, _) => { if (apiVisionCheck is not null) RequestCancellation(apiVisionCheck); else await CheckApiVision(); };
         checkGoogleTranslate.Click += async (_, _) => { if (googleTranslationCheck is not null) RequestCancellation(googleTranslationCheck); else await CheckGoogleTranslate(); };
         showGoogleBrowser.Click += async (_, _) => await ShowGoogleBrowser();
+        showGoogleSearchAiBrowser.Click += async (_, _) => await ShowGoogleSearchAiBrowser();
         target.TextChanged += (_, _) => { if (googleTranslationCheck is null && googleTestResult.Text.Length > 0) googleTestResult.Text = "目标语言已变更，请重新测试谷歌翻译。"; };
         captureMode.Items.AddRange(["VR 左眼", "桌面主显示器"]);
         desktopCaptureSource.Items.AddRange(["主显示器", "指定应用窗口"]);

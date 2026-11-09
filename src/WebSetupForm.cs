@@ -124,11 +124,12 @@ internal sealed class WebSetupFlow : IDisposable
                     ShowStep();
                     break;
                 case "service" when step == 0:
-                    var backend = Choice(message, "backend", "Credits", "Codex", "OpenAI", "GoogleTranslate");
+                    var backend = Choice(message, "backend", "Credits", "Codex", "OpenAI", "GoogleTranslate", "GoogleSearchAI");
                     if (draft.TranslationBackend != backend)
                     {
                         draft = baseline.Copy();
                         draft.TranslationBackend = backend;
+                        if (backend == "GoogleSearchAI") draft.ProcessingMode = "Image";
                     }
                     step = backend == "Credits" && SignedIn ? 2 : 1;
                     ShowStep();

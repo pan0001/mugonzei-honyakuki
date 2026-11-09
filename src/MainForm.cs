@@ -44,6 +44,7 @@ internal sealed partial class MainForm : Form
     private readonly Label localOcrStatus = Note("");
     private readonly Button checkGoogleTranslate = Button("测试谷歌翻译");
     private readonly Button showGoogleBrowser = Button("查看翻译网页");
+    private readonly Button showGoogleSearchAiBrowser = Button("打开 Google 搜索 AI 网页");
     private readonly Label googleTestResult = Note("");
     private readonly ComboBox captureMode = new UiComboBox() { DropDownStyle = ComboBoxStyle.DropDownList, Width = 230 };
     private readonly ComboBox desktopCaptureSource = new UiComboBox { DropDownStyle = ComboBoxStyle.DropDownList, Width = 230 };
@@ -179,7 +180,7 @@ internal sealed partial class MainForm : Form
 
     private void LoadEditorValues(AppSettings settings)
     {
-        backend.SelectedIndex = settings.TranslationBackend switch { "OpenAI" => 1, "GoogleTranslate" => 2, "Credits" => 3, _ => 0 };
+        backend.SelectedIndex = settings.TranslationBackend switch { "OpenAI" => 1, "GoogleTranslate" => 2, "Credits" => 3, "GoogleSearchAI" => 4, _ => 0 };
         creditServer.Text = settings.CreditServerUrl;
         processingMode.SelectedIndex = settings.ProcessingMode switch { "Image" => 1, "Handwriting" => 2, "LocalJapanese" => 3, _ => 0 };
         codexPath.Text = settings.CodexExecutablePath; codexModel.Text = settings.CodexModel;
@@ -211,13 +212,17 @@ internal sealed partial class MainForm : Form
         bool useApi = backend.SelectedIndex == 1;
         bool useGoogle = backend.SelectedIndex == 2;
         bool useCredits = backend.SelectedIndex == 3;
+        bool useGoogleSearchAi = backend.SelectedIndex == 4;
         bool testing = apiVisionCheck is not null || googleTranslationCheck is not null;
         codexSettingsCard.Visible = useCodex;
         apiSettingsCard.Visible = useApi;
         googleSettingsCard.Visible = useGoogle;
+        googleSearchAiSettingsCard.Visible = useGoogleSearchAi;
         creditSettingsCard.Visible = useCredits;
         creditServer.Enabled = creditAccountButton.Enabled = useCredits && !testing;
-        backend.Enabled = processingMode.Enabled = !testing;
+        backend.Enabled = !testing;
+        processingMode.Enabled = !testing && !useGoogleSearchAi;
+        if (useGoogleSearchAi && processingMode.SelectedIndex != 1) processingMode.SelectedIndex = 1;
         codexPath.Enabled = codexModel.Enabled = codexReasoningEffort.Enabled = useCodex;
         checkCodexLogin.Enabled = useCodex && loginCheck is null;
         endpoint.Enabled = model.Enabled = apiKey.Enabled = useApi && !testing;
@@ -226,6 +231,7 @@ internal sealed partial class MainForm : Form
         checkApiVision.Text = apiVisionCheck is not null ? "取消图片测试" : "测试图片识别";
         checkGoogleTranslate.Enabled = useGoogle;
         showGoogleBrowser.Enabled = useGoogle && !testing;
+        showGoogleSearchAiBrowser.Enabled = useGoogleSearchAi && !testing;
         checkGoogleTranslate.Text = googleTranslationCheck is not null ? "取消翻译测试" : "测试谷歌翻译";
         target.Enabled = !testing;
         bool directImage = processingMode.SelectedIndex == 1;
@@ -241,6 +247,7 @@ internal sealed partial class MainForm : Form
                 + "\n完整翻译成功扣 1 积分；无文字、失败或服务端完成前取消不扣。重复查询同一任务不会重复扣分。"
                 + "\n服务端已完成后隐藏字幕不会退回积分；断线时可在「账号与积分」找回最近结果。"
                 + "\n服务端保存订单、消费记录和近期原文/译文用于恢复。截图仅用于本次处理；AI 仅识别请使用自备服务或本地 OCR。"
+            : useGoogleSearchAi ? SettingsValidation.GoogleSearchAiNotice
             : useGoogle
             ? (directImage || handwriting
                 ? "Google Translate 只接受文字，无法直接识图或运行 AI 手写 OCR。\n请将识别方式改为「本地 OCR」或「本地日语手写 OCR」，再保存。"
@@ -282,13 +289,14 @@ internal sealed partial class MainForm : Form
 
     private string SelectedApiImageDetail => apiImageDetail.SelectedIndex switch { 1 => "High", 2 => "Low", 3 => "Auto", _ => "Default" };
     private string SelectedCodexReasoningEffort => codexReasoningEffort.SelectedIndex switch { 1 => "low", 2 => "medium", 3 => "high", _ => "" };
-    private string SelectedBackend => backend.SelectedIndex switch { 1 => "OpenAI", 2 => "GoogleTranslate", 3 => "Credits", _ => "Codex" };
+    private string SelectedBackend => backend.SelectedIndex switch { 1 => "OpenAI", 2 => "GoogleTranslate", 3 => "Credits", 4 => "GoogleSearchAI", _ => "Codex" };
 
     private string SelectedProcessingMode => processingMode.SelectedIndex switch { 1 => "Image", 2 => "Handwriting", 3 => "LocalJapanese", _ => "Ocr" };
 
     private void UpdateRecognitionAction()
     {
         // The workspace uses saved settings; a draft must not silently change where a screenshot goes.
+        recognizeButton.Enabled = settings.TranslationBackend != "GoogleSearchAI";
         recognizeButton.Text = settings.ProcessingMode switch
         {
             "Image" => "仅识别原文（AI）",
@@ -381,6 +389,18 @@ internal sealed partial class MainForm : Form
         }
         try { await translator.ShowGoogleBrowserAsync(); }
         catch (Exception error) { if (!closing) googleTestResult.Text = error.Message; }
+    }
+
+    private async Task ShowGoogleSearchAiBrowser()
+    {
+        if (closing) return;
+        if (busy || selectionActive || selectionCapture is not null || apiVisionCheck is not null || googleTranslationCheck is not null)
+        {
+            SetStatus("请等待当前任务完成或取消，再打开 Google 搜索 AI 网页。");
+            return;
+        }
+        try { await translator.ShowGoogleSearchAiBrowserAsync(); }
+        catch (Exception error) { if (!closing) SetStatus(error.Message); }
     }
 
     private async Task CheckCodexLogin()
@@ -499,6 +519,11 @@ internal sealed partial class MainForm : Form
     {
         if (webDirty) { SetStatus("请先保存或撤销工作台中尚未应用的设置，再截图。"); return; }
         if (closing || setupDialogOpen) return;
+        if (ocrOnly && settings.TranslationBackend == "GoogleSearchAI")
+        {
+            SetStatus("Google 搜索 AI 模式只返回译文。请使用「截图并翻译」，或切换识别服务以提取原文。");
+            return;
+        }
         if (ocrOnly && settings.TranslationBackend == "Credits" && settings.ProcessingMode is "Image" or "Handwriting")
         {
             SetStatus("积分服务提供完整识别与翻译，每次成功扣 1 分。仅识别可选择本地 OCR、本地日语 OCR 或自备 AI 服务。");
@@ -615,7 +640,14 @@ internal sealed partial class MainForm : Form
                     await RunCreditTranslationAsync(request, started, null, png, token);
                     return;
                 }
-                SetStatus(settings.TranslationBackend == "Codex" ? "正在将截图交给 Codex 直接识图…" : "正在将截图交给兼容 API 的视觉模型…");
+                if (settings.TranslationBackend == "GoogleSearchAI")
+                    sourceHint = "Google 搜索 AI 模式只返回译文。";
+                SetStatus(settings.TranslationBackend switch
+                {
+                    "Codex" => "正在将截图交给 Codex 直接识图…",
+                    "GoogleSearchAI" => "正在通过 Google 搜索 AI 网页翻译截图…",
+                    _ => "正在将截图交给兼容 API 的视觉模型…"
+                });
                 ShowStatus("正在翻译截图…");
                 var result = await translator.AnalyzeImageAsync(png, settings, token);
                 token.ThrowIfCancellationRequested();

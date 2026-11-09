@@ -9,6 +9,7 @@ internal static class WebSetupFlowTests
     {
         await SignInOnlyAdvancesOnSuccess();
         await ProviderDraftKeepsCredentialsAtTheirOrigin();
+        await SearchAiRequiresImageAndKeepsOtherCredentials();
         await StandaloneRegistrationAndLogin();
         Console.WriteLine("PASS embedded setup account gating, cancel/retry, automatic routing and origin-bound keys");
     }
@@ -146,5 +147,23 @@ internal static class WebSetupFlowTests
     private static void Assert(bool result)
     {
         if (!result) throw new InvalidOperationException("Embedded setup state assertion failed.");
+    }
+
+    private static async Task SearchAiRequiresImageAndKeepsOtherCredentials()
+    {
+        var previous = new AppSettings { TranslationBackend = "GoogleTranslate", ProcessingMode = "LocalJapanese", ApiKey = "unused-fixture" };
+        var events = new List<JsonElement>();
+        AppSettings? saved = null;
+        using var flow = new WebSetupFlow(previous, s => saved = s, m => events.Add(JsonSerializer.SerializeToElement(m, Web)), _ => {}, false, false);
+        Task Send(object message) => flow.ReceiveAsync(JsonSerializer.SerializeToElement(message));
+        await Send(new { type = "ready" });
+        await Send(new { type = "service", backend = "GoogleSearchAI" });
+        Assert(events[^1].GetProperty("processingMode").GetString() == "Image" && events[^1].GetProperty("step").GetInt32() == 1);
+        await Send(new { type = "configure", processingMode = "Ocr", targetLanguage = "日本語" });
+        Assert(events[^1].GetProperty("error").GetString()!.Length > 0 && saved == null);
+        await Send(new { type = "configure", processingMode = "Image", targetLanguage = "日本語" });
+        await Send(new { type = "finish", runtimeMode = "Desktop", hotkey = "Ctrl+Alt+F9" });
+        Assert(saved is { TranslationBackend: "GoogleSearchAI", ProcessingMode: "Image", TargetLanguage: "日本語", ApiKey: "unused-fixture" });
+        Assert(previous.TranslationBackend == "GoogleTranslate" && !JsonSerializer.Serialize(events).Contains("unused-fixture"));
     }
 }

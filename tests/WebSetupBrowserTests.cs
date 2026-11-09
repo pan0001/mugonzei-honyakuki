@@ -29,6 +29,23 @@ internal static class WebSetupBrowserTests
                 await web.ExecuteScriptAsync($"document.getElementById('{id}')?.hidden === false") == "true");
             if (await web.ExecuteScriptAsync("document.querySelector('input[name=service]:checked')?.value === 'Credits'") != "true")
                 throw new InvalidOperationException("Official account service must be selected on a clean install");
+            await web.ExecuteScriptAsync("document.querySelector('input[value=GoogleSearchAI]').click()");
+            await Click("next");
+            await Visible("config");
+            if (await web.ExecuteScriptAsync("document.querySelector('#processing').value==='Image' && document.querySelector('#processing').disabled && !document.querySelector('#search-ai-notice').hidden && document.querySelector('#account').hidden") != "true")
+                throw new InvalidOperationException("Search AI setup must show where screenshots go and lock the processing mode");
+            await Click("next");
+            await Visible("screen");
+            if (loginCalls != 0 || saved != null || await web.ExecuteScriptAsync("document.querySelector('#disclosure').textContent.includes('Google 搜索 AI')") != "true")
+                throw new InvalidOperationException("Search AI must reach confirmation with its screenshot destination and no account login");
+            await Click("back"); await Visible("config");
+            await Click("back"); await Visible("providers");
+            await web.ExecuteScriptAsync("document.querySelector('input[value=GoogleTranslate]').click()");
+            await Click("next"); await Visible("config");
+            if (await web.ExecuteScriptAsync("document.querySelector('#processing').value==='Ocr' && !document.querySelector('#processing').disabled && document.querySelector('#search-ai-notice').hidden") != "true")
+                throw new InvalidOperationException("The existing Google Translate option still uses local OCR");
+            await Click("back"); await Visible("providers");
+            await web.ExecuteScriptAsync("document.querySelector('input[value=Credits]').click()");
             await Click("next");
             await Visible("account");
             if (await web.ExecuteScriptAsync("document.getElementById('origin').hidden") != "true")

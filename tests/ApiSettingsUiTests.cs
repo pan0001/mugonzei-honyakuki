@@ -43,6 +43,15 @@ public static class ApiSettingsUiTests
                 Get<Label>(form, "apiTestResult").Text = "图片测试通过";
                 model.Text = "a-different-vision-model";
                 Check(Get<Label>(form, "apiTestResult").Text.Contains("配置已变更"), "Old model success does not imply a new model was verified");
+                Get<ComboBox>(form, "backend").SelectedItem = "Google 搜索 AI 模式（实验性）";
+                var google = form.ReadSettingsDraft();
+                Check(google.TranslationBackend == "GoogleSearchAI" && google.ProcessingMode == "Image" && !Get<ComboBox>(form, "processingMode").Enabled,
+                    "The native service picker selects direct screenshots for Search AI");
+                Check(google.ApiKey == "new-provider-test-key" && Get<Label>(form, "dataNote").Text.Contains("截图和目标语言会发送给 Google"),
+                    "Switching to Search AI preserves other credentials and discloses the screenshot destination");
+                Get<ComboBox>(form, "backend").SelectedIndex = 2;
+                Check(form.ReadSettingsDraft() is { TranslationBackend: "GoogleTranslate", ProcessingMode: "Ocr" } && Get<ComboBox>(form, "processingMode").Enabled,
+                    "Switching back to the text-only Google translation service selects local OCR");
             }
             catch (Exception ex) { failure = ex; }
             finally

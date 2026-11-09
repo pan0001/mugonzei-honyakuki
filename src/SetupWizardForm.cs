@@ -26,7 +26,8 @@ internal sealed class SetupWizardForm : Form
         new() { Name = "wizardServiceCredits", Number = "01", Text = "账号积分服务（推荐）", Description = "登录一个账号即可开始 · 完整翻译成功扣 1 积分" },
         new() { Name = "wizardServiceApi", Number = "02", Text = "使用自己的 API 服务", Description = "填写地址、模型与密钥 · 支持云端和本机接口" },
         new() { Name = "wizardServiceCodex", Number = "03", Text = "连接本机 Codex", Description = "连接本机已登录的 Codex · 使用现有账号" },
-        new() { Name = "wizardServiceGoogle", Number = "04", Text = "本地 OCR + Google 翻译", Description = "在电脑上识别文字，再交给 Google 翻译 · 无需 API 密钥" }
+        new() { Name = "wizardServiceGoogle", Number = "04", Text = "本地 OCR + Google 翻译", Description = "在电脑上识别文字，再交给 Google 翻译 · 无需 API 密钥" },
+        new() { Name = "wizardServiceGoogleSearchAi", Number = "05", Text = "Google 搜索 AI 模式（实验性）", Description = "截图发送给 Google · 无需密钥或应用积分 · 可能遇到验证或限流" }
     ];
     private readonly ComboBox processingMode = Combo("wizardProcessingMode");
     private readonly TextBox targetLanguage = Input("wizardTargetLanguage");
@@ -237,15 +238,14 @@ internal sealed class SetupWizardForm : Form
     }
 
     private string SelectedBackend => serviceChoices[1].Checked ? "OpenAI" : serviceChoices[2].Checked ? "Codex"
-        : serviceChoices[3].Checked ? "GoogleTranslate" : "Credits";
+        : serviceChoices[3].Checked ? "GoogleTranslate" : serviceChoices[4].Checked ? "GoogleSearchAI" : "Credits";
     private string SelectedMode => processingMode.SelectedIndex switch { 1 => "Image", 2 => "Handwriting", 3 => "LocalJapanese", _ => "Ocr" };
 
     private void ValidateChoice()
     {
         if (string.IsNullOrWhiteSpace(targetLanguage.Text) || targetLanguage.Text.Trim().Length > 100)
             throw new InvalidOperationException("请填写目标语言，例如“简体中文”，最多 100 个字符。");
-        if (SelectedBackend == "GoogleTranslate" && SelectedMode is "Image" or "Handwriting")
-            throw new InvalidOperationException("Google Translate 只能翻译文字。请选择“本地 OCR”或“本地日语手写 OCR”，或改用支持图片的翻译服务。");
+        SettingsValidation.ValidateBackendMode(ReadSettingsDraft());
     }
 
     private void ValidateService()
@@ -267,7 +267,7 @@ internal sealed class SetupWizardForm : Form
                 throw new InvalidOperationException("Codex 程序路径过长，请检查输入。");
             return;
         }
-        if (SelectedBackend == "GoogleTranslate") return;
+        if (SelectedBackend is "GoogleTranslate" or "GoogleSearchAI") return;
         Uri endpoint = TranslationClient.GetEndpoint(apiEndpoint.Text.Trim());
         if (string.IsNullOrWhiteSpace(apiModel.Text) || apiModel.Text.Trim().Length > 256 || apiModel.Text.Any(char.IsControl))
             throw new InvalidOperationException("请填写此服务实际可用的模型名称。");
@@ -295,10 +295,11 @@ internal sealed class SetupWizardForm : Form
 
     private void LoadInitialValues()
     {
-        serviceChoices[initial.TranslationBackend switch { "OpenAI" => 1, "Codex" => 2, "GoogleTranslate" => 3, _ => 0 }].Checked = true;
+        serviceChoices[initial.TranslationBackend switch { "OpenAI" => 1, "Codex" => 2, "GoogleTranslate" => 3, "GoogleSearchAI" => 4, _ => 0 }].Checked = true;
         desktop.Checked = firstRun || initial.DesktopMode;
         headset.Checked = !desktop.Checked;
-        processingMode.SelectedIndex = initial.ProcessingMode switch { "Image" => 1, "Handwriting" => 2, "LocalJapanese" => 3, _ => 0 };
+        processingMode.SelectedIndex = initial.TranslationBackend == "GoogleSearchAI" ? 1 :
+            initial.ProcessingMode switch { "Image" => 1, "Handwriting" => 2, "LocalJapanese" => 3, _ => 0 };
         targetLanguage.Text = initial.TargetLanguage;
         codexPath.Text = initial.CodexExecutablePath;
         codexModel.Text = initial.CodexModel;
@@ -396,15 +397,20 @@ internal sealed class SetupWizardForm : Form
 
     private void ServiceChanged()
     {
+        if (modeBeforeGoogle is int previous)
+        {
+            modeBeforeGoogle = null;
+            processingMode.SelectedIndex = previous;
+        }
         if (SelectedBackend == "GoogleTranslate" && SelectedMode is "Image" or "Handwriting")
         {
             modeBeforeGoogle = processingMode.SelectedIndex;
             processingMode.SelectedIndex = 0;
         }
-        else if (SelectedBackend != "GoogleTranslate" && modeBeforeGoogle is int previous)
+        else if (SelectedBackend == "GoogleSearchAI" && SelectedMode != "Image")
         {
-            modeBeforeGoogle = null;
-            processingMode.SelectedIndex = previous;
+            modeBeforeGoogle = processingMode.SelectedIndex;
+            processingMode.SelectedIndex = 1;
         }
         RefreshServiceChoices();
     }
@@ -449,6 +455,7 @@ internal sealed class SetupWizardForm : Form
         codexCard.Visible = SelectedBackend == "Codex";
         apiCard.Visible = SelectedBackend == "OpenAI";
         googleCard.Visible = SelectedBackend == "GoogleTranslate";
+        processingMode.Enabled = SelectedBackend != "GoogleSearchAI";
 
         bool incompatible = SelectedBackend == "GoogleTranslate" && SelectedMode is "Image" or "Handwriting";
         modeNote.ForeColor = incompatible ? Color.FromArgb(255, 174, 161) : UiTheme.Muted;
@@ -464,6 +471,7 @@ internal sealed class SetupWizardForm : Form
         if (SelectedBackend == "Credits") modeNote.Text = SelectedMode is "Image" or "Handwriting"
             ? "积分服务一次请求直接翻译截图。成功扣 1 分；无字、失败或完成前取消不扣。"
             : "先在本机识别，再把原文发给积分服务。成功翻译扣 1 分；仅本地识别不扣。";
+        if (SelectedBackend == "GoogleSearchAI") modeNote.Text = SettingsValidation.GoogleSearchAiNotice;
         ClearError();
         RefreshSummary();
     }
@@ -478,7 +486,7 @@ internal sealed class SetupWizardForm : Form
                 if (rows.GetControlFromPosition(col, row) is { } control) control.Visible = !draft.DesktopMode;
         triggerCard.Text = draft.DesktopMode ? "桌面快捷键" : "SteamVR 触发方式";
         disclosure.Text = (SelectedMode is "Image" or "Handwriting" ? "截图会发送给" : "仅识别出的原文会发送给") +
-            (SelectedBackend switch { "Credits" => "积分服务及其 AI 提供方。", "Codex" => "本机 Codex 配置的模型。", "GoogleTranslate" => "Google 翻译。", _ => "你配置的模型服务。" });
+            (SelectedBackend switch { "Credits" => "积分服务及其 AI 提供方。", "Codex" => "本机 Codex 配置的模型。", "GoogleTranslate" => "Google 翻译。", "GoogleSearchAI" => "Google 搜索 AI 模式。", _ => "你配置的模型服务。" });
         if (draft.DesktopMode) { triggerNote.Text = "在其他应用中也能直接截图，译文会显示在桌面。"; return; }
         triggerNote.Text = !draft.ControllerEnabled
             ? "手柄触发已关闭。可使用上方键盘快捷键或工作台按钮截图。"
@@ -523,7 +531,7 @@ internal sealed class SetupWizardForm : Form
         Control focus = CurrentStep switch
         {
             0 => serviceChoices.Single(choice => choice.Checked),
-            1 => SelectedBackend switch { "OpenAI" => apiEndpoint, "Codex" => codexModel, _ => processingMode },
+            1 => SelectedBackend switch { "OpenAI" => apiEndpoint, "Codex" => codexModel, "GoogleSearchAI" => targetLanguage, _ => processingMode },
             _ => desktop.Checked ? desktop : headset
         };
         if (Visible) focus.Focus();

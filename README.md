@@ -8,7 +8,7 @@
 
 在 Windows 桌面或 SteamVR 中截取手写和印刷文字，在屏幕或头显下方阅读翻译字幕。
 
-[Windows x64 安装程序 · v0.2.10-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.10-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.10-preview.exe) · [便携 ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.10-preview/Mugonzei-Honyakuki-win-x64-v0.2.10-preview.zip) · [反馈问题](https://github.com/pan0001/mugonzei-honyakuki/issues)
+[Windows x64 安装程序 · v0.2.11-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.11-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.11-preview.exe) · [便携 ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.11-preview/Mugonzei-Honyakuki-win-x64-v0.2.11-preview.zip) · [反馈问题](https://github.com/pan0001/mugonzei-honyakuki/issues)
 
 **工作台示例**
 
@@ -25,7 +25,7 @@
 - **AI 手写翻译**：发送一张截图，模型直接返回中、日、英手写文字的译文；想核对字迹时，可以在自备 AI 服务中单独识别原文。
 - **直接识图**：默认优先翻译游戏对白、手写留言、路牌和任务文字；网页或文档则保留正文。识别时会忽略性能监控、快捷键提示、OSC 控件和系统任务栏，并合并重复字幕。
 - **本地 OCR**：Tesseract 印刷文字识别，以及独立的 NDLOCR-Lite 日语识别；识别阶段可在本机完成。
-- **多种翻译服务**：已登录的 Codex、云端或本机 OpenAI 兼容 API，以及后台 Google Translate 网页。
+- **多种翻译服务**：账号积分、自备 API、本机 Codex，以及两个独立的 Google 网页通道：Google 搜索 AI 模式翻译截图，Google Translate 翻译 OCR 文字。
 - **账号与积分**：可在账户中通过爱发电充值，查看订单和消费记录。完整翻译成功扣 1 积分；自备服务不消耗服务器积分。
 - **可选框选**：用双手柄拉出矩形，仅翻译选区，结果固定在 SteamVR 追踪空间。
 - **保留问题样本**：工作台可手动保存当前截图。自备服务不自动建立翻译历史；积分服务保存近期结果供断线恢复。
@@ -43,8 +43,8 @@
 ## 快速开始
 
 1. 运行 Windows 安装程序，按提示为当前用户安装，再从开始菜单打开「Mugonzei Honyakuki」。使用便携版时，将 ZIP 完整解压到可写目录，再运行 `SteamVrTranslator.exe`。
-2. 选择翻译服务：账号积分服务、自备 API、本机 Codex 或本地 OCR + Google 翻译。
-3. 账号积分服务使用独立登录页；登录成功后选择使用模式。自备 API、Codex 和 Google 翻译不要求登录积分账号。
+2. 选择翻译服务：账号积分服务、自备 API、本机 Codex、本地 OCR + Google 翻译，或 Google 搜索 AI 模式。
+3. 账号积分服务使用独立登录页；登录成功后选择使用模式。其余服务均不要求登录积分账号。
 4. 推荐保留「自动」：未运行 SteamVR 时按 **Ctrl+Alt+T** 截取主屏。要只翻译一个应用，在「截图并翻译」旁点「截图来源」，选「指定窗口」、选中目标并应用。「截图并翻译」和快捷键使用相同的截图来源；窗口关闭或最小化时会提示，不会改截其他内容。你自己启动 SteamVR 并连接成功后，长按左手柄 **X 1.5 秒**截图翻译。退出 SteamVR 会回到桌面。手动选择「桌面」会保持桌面，重新选「自动」才恢复跟随；任何模式都不会替你启动 SteamVR。
 
 工作台上方只有「截图并翻译」「取消」「保留当前截图」。下方分别显示截图预览、翻译结果与识别原文。识别原文是从图里读出的字。第二页「账号与 AI 服务」依次提供「账号登录」「偏好」「积分服务」；独立登录不改变翻译服务。
@@ -77,7 +77,7 @@ git pull --ff-only
 | 方式 | 处理流程 | 图片去向 |
 | --- | --- | --- |
 | 本地OCR（不推荐） | Tesseract 识别，再翻译文字 | 识别留在本机；只发送原文给翻译服务 |
-| 直接发送截图给模型 | 视觉模型读取并翻译，自行组织输出 | 截图发送到所选 Codex / API |
+| 直接发送截图给模型 | 视觉模型读取并翻译，自行组织输出 | 截图发送到所选服务；Google 搜索 AI 模式会将图片上传到 Google 网页 |
 | 手写截图直译（AI） | 从截图直接翻译手写文字，只请求模型一次 | 一张截图发给所选服务，只返回译文 |
 | 本地日语手写 OCR → 翻译 | NDLOCR-Lite 本机识别，再翻译文字 | 识别留在本机；只发送原文给翻译服务 |
 
@@ -136,6 +136,12 @@ Linux / systemd 的初始配置、SSH 隧道和备份步骤见 [部署说明](se
 
 「测试图片识别」发送的是程序生成的固定测试图，不是当前游戏画面。切换服务地址时请重新填写该服务的模型和密钥；未保存的 AI 设置会阻止新的识别请求。
 
+### Google 搜索 AI 模式（实验性）
+
+在首次配置或「账号与 AI 服务 → 偏好」选择「Google 搜索 AI 模式」，设置目标语言，然后照常截图。客户端把截图作为附件，连同翻译提示词提交到 [Google 搜索 AI 模式](https://www.google.com/aimode)，再把网页回答显示为字幕。只提交一次，不先做 OCR、不用 API 密钥、不消耗本应用积分。要让截图留在本机，请改用本地 OCR 和本机翻译服务。
+
+此通道使用独立的 WebView2 配置，不共享 Chrome 的登录，也不占用鼠标或剪贴板。需要登录或同意条款时，在偏好页点「打开 Google 搜索 AI 网页」，自行处理后关闭网页再截图。Google 的地区、账号、用量限制或页面改版都可能影响可用性；遇到验证或无法确认本次回答时会报错，不会改走付费服务。取消不撤回已经上传到 Google 的图片。[Google 官方图像提问说明](https://support.google.com/websearch/answer/16011537)。
+
 ### Google Translate 后台网页
 
 选择「Google Translate（后台网页）」，搭配「本地OCR（不推荐）」或本地日语 OCR。程序通过独立的 WebView2 网页填入识别文字并读取译文，无需 API 密钥；它不是 Gemini，也不是 Google Cloud Translation API。
@@ -169,7 +175,7 @@ Linux / systemd 的初始配置、SSH 隧道和备份步骤见 [部署说明](se
 - 设置保存在 `%LOCALAPPDATA%/SteamVrTranslator/`。API 密钥使用当前 Windows 用户的 DPAPI 加密；Codex 登录由 CLI 自行管理。
 - 使用云端视觉模型时会发送截图；使用本地 OCR 时，只把识别文字发送给所选翻译服务。只有识别与翻译都使用本机服务时，全流程才可离线。
 - Codex 和本地日语 OCR 会创建临时 PNG，正常完成、失败或取消时尝试清理；强制终止或断电可能留下临时文件。
-- Google 网页使用独立的 `GoogleWebView2/` 数据目录，不共享个人浏览器登录，但会保留网站 Cookie 和缓存。
+- Google Translate 与 Google 搜索 AI 分别使用 `GoogleWebView2/` 和 `GoogleSearchAiWebView2/`。两者不共享个人浏览器登录，但可保留网站 Cookie 和缓存；Google 也可能按其服务及账号设置保存上传内容。
 - 桌面端不自动保存截图；「保留当前截图」由用户主动操作。自备服务不自动保存译文历史；积分服务在服务器保存近期原文/译文用于找回任务，并保存订单和消费记录。开发诊断命令会另外写入图片、原文或结果报告。
 - 提交 Issue 前请遮盖私人信息。不要上传设置、凭据、个人截图或完整诊断目录。
 

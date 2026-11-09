@@ -13,7 +13,7 @@
   };
   let current = -1, backend = '', initialized = false, firstRun = true, loginOnly = false, pending = false, registering = false;
   let codeAddress = '', cooldownEmail = '', resendAfter = 0, codeTimer;
-  let canLogin = false, keyOrigin = '', hasKey = false, editedOrigin = '', previousAiMode = null;
+  let canLogin = false, keyOrigin = '', hasKey = false, editedOrigin = '', previousMode = null, modeProvider = '';
   const setText = (el, value) => { if (el.textContent !== value) el.textContent = value; };
   function origin(address) {
     try { return new URL(address).origin; } catch { return ''; }
@@ -75,6 +75,7 @@
     $('providers').hidden = current !== 0; $('account').hidden = !login;
     $('config').hidden = !configuring; $('screen').hidden = current !== 2;
     $('api').hidden = backend !== 'OpenAI'; $('codex').hidden = backend !== 'Codex';
+    $('search-ai-notice').hidden = backend !== 'GoogleSearchAI';
     if (!login) $('pwd').value = '';
     $('verification').hidden = !registering;
     $('register').hidden = !login || registering || !canLogin;
@@ -84,20 +85,24 @@
     if (configuring && changed) {
       const processing = $('processing');
       const google = backend === 'GoogleTranslate';
+      const searchAi = backend === 'GoogleSearchAI';
+      if (modeProvider !== backend && previousMode) {
+        processing.value = previousMode; previousMode = null;
+      }
+      modeProvider = backend;
+      processing.disabled = searchAi;
       for (const option of processing.options) {
         const image = option.value === 'Image' || option.value === 'Handwriting';
-        option.disabled = google && image;
+        option.disabled = (google && image) || (searchAi && option.value !== 'Image');
       }
-      if (google && processing.selectedOptions[0]?.disabled) {
-        previousAiMode = processing.value; processing.value = 'Ocr';
-      } else if (!google && previousAiMode) {
-        processing.value = previousAiMode; previousAiMode = null;
+      if (processing.selectedOptions[0]?.disabled) {
+        previousMode = processing.value; processing.value = searchAi ? 'Image' : 'Ocr';
       }
     }
     if (current === 2) {
       $('key').value = '';
       const image = ['Handwriting', 'Image'].includes(data.processingMode);
-      const destination = {Credits:'账号积分服务及其 AI 提供方', OpenAI:'你设置的模型服务', Codex:'本机 Codex 使用的模型', GoogleTranslate:'Google 翻译'}[backend];
+      const destination = {Credits:'账号积分服务及其 AI 提供方', OpenAI:'你设置的模型服务', Codex:'本机 Codex 使用的模型', GoogleTranslate:'Google 翻译', GoogleSearchAI:'Google 搜索 AI 模式'}[backend];
       setText($('disclosure'), image ? '截图会发送到' + destination + '，一次请求直接返回译文。' : '识别出的文字会发送到' + destination + '。');
     }
     hasKey = data.hasApiKey; keyOrigin = data.keyOrigin; keyHint();

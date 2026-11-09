@@ -12,6 +12,10 @@ internal static class WebWorkspaceHostTests
         var next = WebSettingsPatch.Apply(existing, patch.RootElement);
         if (next.ApiKey != "" || existing.ApiKey.Length == 0 || WebSettingsPatch.Public(existing).ToJsonString().Contains(existing.ApiKey))
             throw new Exception("Workspace bridge leaked or reused an upstream key");
+        var searchAi = WebSettingsPatch.Apply(existing, JsonSerializer.SerializeToElement(new { translationBackend = "GoogleSearchAI" }));
+        SettingsValidation.ValidateForSave(searchAi, true);
+        if (searchAi.ProcessingMode != "Image" || searchAi.ApiKey != existing.ApiKey || WebSettingsPatch.Public(searchAi).ToJsonString().Contains(existing.ApiKey))
+            throw new Exception("Search AI must use a screenshot without exposing saved provider credentials");
         string windowId = Guid.NewGuid().ToString("N");
         using var selection = JsonDocument.Parse(JsonSerializer.Serialize(new { desktopCaptureSource = "Window", desktopWindowId = windowId }));
         var selected = WebSettingsPatch.Apply(existing, selection.RootElement);

@@ -23,6 +23,7 @@
           <label><input type="radio" name="service" value="OpenAI"><span class="choice"><strong>使用自己的 API 服务</strong><span>连接支持图片或文字的云端、本机模型</span></span></label>
           <label><input type="radio" name="service" value="Codex"><span class="choice"><strong>连接本机 Codex</strong><span>使用本机已登录的 Codex 翻译</span></span></label>
           <label><input type="radio" name="service" value="GoogleTranslate"><span class="choice"><strong>本地 OCR + Google 翻译</strong><span>本机识别文字，通过 Google 翻译网页获取译文</span></span></label>
+          <label><input type="radio" name="service" value="GoogleSearchAI"><span class="choice"><strong>Google 搜索 AI 模式 <small>实验性</small></strong><span>截图发送给 Google，无需密钥或应用积分。可能遇到验证或限流。</span></span></label>
         </fieldset>
       </section>
       <section id="account" hidden aria-label="账号登录">
@@ -55,6 +56,7 @@
         </div>
         <div class="field"><label for="processing">识图方式</label><select id="processing"><option value="Ocr">本地 OCR（不推荐）</option><option value="Image">直接发送截图给模型</option><option value="Handwriting">手写截图直译（AI）</option><option value="LocalJapanese">本地日语手写 OCR</option></select></div>
         <div class="field"><label for="target">目标语言</label><input id="target" maxlength="100" placeholder="例如：简体中文"></div>
+        <p id="search-ai-notice" class="hint" hidden>截图和目标语言会发送给 Google。无需 API 密钥，不消耗本应用积分。Google 可能限流，可用性因账号和地区而异。如需登录或验证，可在工作台的服务设置中打开网页处理。</p>
       </section>
       <section id="screen" hidden aria-label="使用模式">
         <fieldset class="choices">

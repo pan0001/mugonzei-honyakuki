@@ -253,6 +253,15 @@ async function main() {
     assert.deepEqual(await run("sent.at(-1)"), {type:"save",settings:{translationBackend:"GoogleTranslate",processingMode:"Ocr"}});
     await run("send({type:'saved',settings:{translationBackend:'GoogleTranslate',processingMode:'Ocr'}})");
     assert.deepEqual(await run("[el('saveBar').hidden,field('apiModel').value,field('processingMode').value]"), [true,"vision","Ocr"]);
+    await run("window.actionsBeforeSearch=sent.filter(m=>m.type==='action').length;edit('translationBackend','GoogleSearchAI')");
+    assert.deepEqual(await run("[field('processingMode').value,field('processingMode').disabled,el('privacyHint').textContent.includes('截图和目标语言会发送给 Google 搜索 AI'),sent.filter(m=>m.type==='action').length===actionsBeforeSearch]"),
+      ["Image",true,true,true],"Selecting Search AI sets screenshot mode without opening or contacting Google");
+    await run("q('[data-action=googleSearchAiBrowser]').click()");
+    assert.deepEqual(await run("sent.at(-1)"), {type:"action",action:"googleSearchAiBrowser"}, "Opening the Google page sends no screenshot or settings draft");
+    await run("el('save').click()");
+    assert.deepEqual(await run("sent.at(-1)"), {type:"save",settings:{translationBackend:"GoogleSearchAI",processingMode:"Image"}});
+    await run("send({type:'saved',settings:{translationBackend:'GoogleSearchAI',processingMode:'Image'}});send({type:'state',canRecognize:false})");
+    assert.equal(await run("el('recognizeButton').disabled"),true);
     await run("showPage('capture');edit('cropX','20'); el('save').click();");
     assert.equal(await run("el('status').textContent.includes('超出画面')"), true);
     await run("edit('cropWidth','80'); el('save').click();");

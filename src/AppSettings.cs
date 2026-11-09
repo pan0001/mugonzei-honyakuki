@@ -149,7 +149,7 @@ public static class SettingsStore
             && value.Length <= maximum && (allowEmpty || !string.IsNullOrWhiteSpace(value));
         static bool Number(float value, float minimum, float maximum) => float.IsFinite(value)
             && value >= minimum && value <= maximum;
-        if (settings.TranslationBackend is not ("Codex" or "OpenAI" or "GoogleTranslate" or "Credits")
+        if (settings.TranslationBackend is not ("Codex" or "OpenAI" or "GoogleTranslate" or "GoogleSearchAI" or "Credits")
             || settings.DesktopCaptureSource is not ("PrimaryMonitor" or "Window")
             || !Text(settings.CreditServerUrl, 2048)
             || settings.ProcessingMode is not ("Ocr" or "Image" or "Handwriting" or "LocalJapanese")
@@ -167,5 +167,6 @@ public static class SettingsStore
             || !Number(settings.OverlayWidth, 0.3f, 2) || !Number(settings.OverlayDistance, 0.4f, 4)
             || !Number(settings.OverlayVerticalOffset, -2, 2) || settings.DisplaySeconds is < 0 or > 300)
             throw new InvalidOperationException("设置包含缺失文字、无效数字或超出范围的参数，请重新填写并保存设置。");
+        if (settings.TranslationBackend == "GoogleSearchAI") SettingsValidation.ValidateBackendMode(settings);
     }
 }

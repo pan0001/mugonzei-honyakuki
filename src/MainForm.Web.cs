@@ -107,7 +107,7 @@ internal sealed partial class MainForm
             Math.Min(800, Screen.FromControl(this).WorkingArea.Height));
         // The capture pipeline also supplies the tray and headset. Keep its input/state adapters,
         // but do not build or show the old native pages under the browser.
-        codexSettingsCard = new(); apiSettingsCard = new(); googleSettingsCard = new();
+        codexSettingsCard = new(); apiSettingsCard = new(); googleSettingsCard = new(); googleSearchAiSettingsCard = new();
         creditSettingsCard = new(); localOcrSettingsCard = new(); vrInputSettings = new();
         InitializeSettingsControls();
         web = new LocalWebSurface("workspace.html", ReceiveWorkspace, profile);
@@ -145,7 +145,8 @@ internal sealed partial class MainForm
         Put("canSavePreview", IsWorkspacePreviewCurrent(thumbnailRevision));
         // If the bitmap changed, deliver the new capture number along with its own pixels.
         if (!full && thumbnailSent && ReferenceEquals(preview.Image, projectedPreview)) Put("captureLabel", imageBox.Text);
-        Put("canCancel", cancelButton.Enabled); Put("canRecognize", !(settings.TranslationBackend == "Credits" && settings.ProcessingMode is "Image" or "Handwriting"));
+        Put("canCancel", cancelButton.Enabled); Put("canRecognize", recognizeButton.Enabled
+            && !(settings.TranslationBackend == "Credits" && settings.ProcessingMode is "Image" or "Handwriting"));
         Put("recognizeLabel", recognizeButton.Text); Put("inputHelp", workspaceInputHelp.Text); Put("page", pages.Count > 0 ? pageIndex + 1 : 0);
         Put("pages", pages.Count); Put("apiTestResult", apiTestResult.Text); Put("googleTestResult", googleTestResult.Text);
         Put("localOcrStatus", localOcrStatus.Text); Put("creditNote", creditBalanceNote.Text);
@@ -288,6 +289,7 @@ internal sealed partial class MainForm
                             case "testApi": if (apiVisionCheck is not null) RequestCancellation(apiVisionCheck); else await CheckApiVision(); break;
                             case "testGoogle": if (googleTranslationCheck is not null) RequestCancellation(googleTranslationCheck); else await CheckGoogleTranslate(); break;
                             case "googleBrowser": await ShowGoogleBrowser(); break;
+                            case "googleSearchAiBrowser": await ShowGoogleSearchAiBrowser(); break;
                             case "reconnect": ConnectVr(); break;
                             default: throw new ArgumentException("不支持这个操作。");
                         }

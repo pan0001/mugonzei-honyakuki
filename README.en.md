@@ -8,7 +8,7 @@
 
 Translate handwritten or printed text on a Windows desktop or in SteamVR, with subtitles near the bottom of the monitor or headset view.
 
-[Windows x64 installer · v0.2.10-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.10-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.10-preview.exe) · [Portable ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.10-preview/Mugonzei-Honyakuki-win-x64-v0.2.10-preview.zip) · [Report an issue](https://github.com/pan0001/mugonzei-honyakuki/issues)
+[Windows x64 installer · v0.2.11-preview](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.11-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.11-preview.exe) · [Portable ZIP](https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.11-preview/Mugonzei-Honyakuki-win-x64-v0.2.11-preview.zip) · [Report an issue](https://github.com/pan0001/mugonzei-honyakuki/issues)
 
 **Example: translating a station sign into Simplified Chinese**
 
@@ -25,7 +25,7 @@ Translate handwritten or printed text on a Windows desktop or in SteamVR, with s
 - **AI handwriting translation:** send one screenshot to translate Chinese, Japanese or English handwriting directly. With your own AI service, you can also request a separate transcription to check the writing.
 - **Direct image analysis:** game screenshots prioritize dialogue, handwriting, signs and quest text. Web pages and documents keep their main text. The translator asks the model to ignore performance overlays, hotkey hints, OSC controls and the taskbar, and collapses duplicate subtitles.
 - **Local OCR:** Tesseract for printed text and a separate NDLOCR-Lite engine for Japanese recognition. The recognition stage can run locally.
-- **Multiple translation services:** an existing Codex login, cloud or local OpenAI-compatible APIs, and a background Google Translate webpage.
+- **Translation services:** account credits, your own API, local Codex, and two separate Google web options: Google Search AI Mode for screenshots, or Google Translate for OCR text.
 - **Accounts and credits:** top up through Afdian from your account and view your orders and transactions. A complete successful translation costs one credit; your own providers do not consume server credits.
 - **Optional region selection:** use both controllers to draw a rectangle, translate only that region, and keep the result fixed in SteamVR tracking space.
 - **Save problem samples:** manually save the current screenshot from the workspace. Your own providers do not create translation history; the credit server retains recent results for recovery after a disconnect.
@@ -43,8 +43,8 @@ The desktop interface is currently mainly in Simplified Chinese. This repository
 ## Quick start
 
 1. Run the Windows installer for your user account, then open **Mugonzei Honyakuki** from the Start menu. For the portable version, extract the entire ZIP to a folder you can write to and run `SteamVrTranslator.exe`.
-2. Choose the account credit service, your own API, local Codex, or local OCR with Google Translate.
-3. The credit service opens a dedicated sign-in page before mode selection. Your own API, Codex and Google Translate do not require a credit account.
+2. Choose account credits, your own API, local Codex, local OCR with Google Translate, or Google Search AI Mode.
+3. The credit service opens a dedicated sign-in page before mode selection. The other services do not require a credit account.
 4. Leave the mode on Auto: **Ctrl+Alt+T** captures your primary monitor. To capture an individual app, open 「截图来源」 next to the capture button, select 「指定窗口」, choose the window, and apply. The button and the shortcut use the same source. A closed or minimized target produces a message instead of a screenshot from another window. After SteamVR connects, hold **left X for 1.5 seconds** to translate. Closing SteamVR returns to the desktop. Select Desktop to stay there, or Auto to resume following SteamVR. No mode launches SteamVR.
 
 The workspace has three actions: capture and translate, cancel, and keep the current screenshot. It shows the screenshot, translation and original text read from the image. The Account & AI Services page has three sections in order: Sign in, Preferences, and Credits. Signing in there does not change your translation provider.
@@ -77,7 +77,7 @@ Further changes are delivered through incremental commits and released under new
 | Mode in the UI | Processing flow | Where images go |
 | --- | --- | --- |
 | 本地OCR（不推荐） (Local OCR, not recommended) | Tesseract recognition, followed by text translation | Recognition stays on your computer; only the source text is sent to the translation service |
-| 直接发送截图给模型 (Send Screenshot Directly to Model) | A vision model reads and translates the image, choosing its own output format | The screenshot is sent to the selected Codex / API service |
+| 直接发送截图给模型 (Send Screenshot Directly to Model) | A vision model reads and translates the image, choosing its own output format | The selected service receives the screenshot; Google Search AI Mode uploads it to Google’s webpage |
 | 手写截图直译（AI） (AI handwriting translation) | Translate handwriting directly in one model request | One screenshot goes to the selected provider; only the translation is returned |
 | 本地日语手写 OCR → 翻译 (Local Japanese Handwriting OCR → Translation) | Local NDLOCR-Lite recognition, followed by text translation | Recognition stays on your computer; only the source text is sent to the translation service |
 
@@ -136,6 +136,12 @@ Start the local service and load a suitable model yourself first. You can leave 
 
 「测试图片识别」 (Test Image Recognition) sends a fixed image generated by the app, not your current game view. When switching service addresses, enter the model and key for that service again. Unsaved AI settings block new recognition requests.
 
+### Google Search AI Mode (experimental)
+
+Choose 「Google 搜索 AI 模式」 during setup or in service preferences, then set your target language and capture as usual. The app attaches the screenshot and submits one translation prompt to [Google Search AI Mode](https://www.google.com/aimode). The answer appears as subtitles. This skips local OCR, needs no API key, and uses no app credits. For local-only processing, choose local OCR and a local translation service instead.
+
+The background WebView2 profile is separate from Chrome and does not use your mouse or clipboard. If Google requests sign-in or consent, use 「打开 Google 搜索 AI 网页」 in preferences, complete the step yourself, and close the window before capturing again. Region, account eligibility, usage limits and website changes can affect availability. Challenges or unconfirmed answers produce an error; the app does not switch to a paid service. Cancelling cannot recall an image already uploaded to Google. [Google’s image question instructions](https://support.google.com/websearch/answer/16011537).
+
 ### Background Google Translate webpage
 
 Select 「Google Translate（后台网页）」 (Google Translate — Background Webpage) together with 「本地OCR（不推荐）」 (Local OCR, not recommended) or local Japanese OCR. The app enters recognized text into a separate WebView2 page and reads the translation. No API key is required. This is neither Gemini nor the Google Cloud Translation API.
@@ -169,8 +175,8 @@ The frame is fixed in SteamVR tracking space. It does not automatically follow g
 - Settings are stored in `%LOCALAPPDATA%/SteamVrTranslator/`. API keys are encrypted with DPAPI for the current Windows user. Codex login is managed by the CLI itself.
 - Cloud vision models receive screenshots. With local OCR, only the recognized text is sent to the selected translation service. The entire process can be offline only when both recognition and translation use local services.
 - Codex and local Japanese OCR create temporary PNG files and attempt to clean them up on completion, failure, or cancellation. Forced termination or a power outage can leave temporary files behind.
-- The Google webpage uses a separate `GoogleWebView2/` data directory. It does not share your personal browser login, but it retains website cookies and cache.
-- The desktop app does not automatically save screenshots; 「保留当前截图」 (Save Current Screenshot) is a manual action. Your own providers do not save translation history. The credit server retains recent source text and translations for recovery, plus order and credit records. Development diagnostics separately write images, source text, or result reports.
+- Google Translate and Google Search AI Mode use separate profiles (`GoogleWebView2/` and `GoogleSearchAiWebView2/`). Neither shares your personal browser login. They may retain cookies and cache, and Google may retain uploads according to its services and account settings.
+- The desktop app does not automatically save screenshots; 「保留当前截图」 (Save Current Screenshot) is a manual action. The app does not maintain a local translation history for external providers. The credit server retains recent source text and translations for recovery, plus order and credit records. Development diagnostics separately write images, source text, or result reports.
 - Redact private information before submitting an issue. Do not upload settings, credentials, personal screenshots, or entire diagnostic directories.
 
 ## Building from source

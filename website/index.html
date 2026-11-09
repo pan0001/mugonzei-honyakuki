@@ -27,10 +27,10 @@
       <h1 id="heading">把眼前的字，<br><em>翻成字幕。</em></h1>
       <p class="lead">在游戏、网页或朋友的手写留言里看到陌生文字？按下快捷键，或长按 VR 手柄，就能在当前画面阅读译文。</p>
       <div class="download">
-        <a class="primary" href="/downloads/v0.2.10-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.10-preview.exe"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z"/></svg>下载 Windows 安装程序</a>
-        <a class="quiet" href="https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.10-preview/Mugonzei-Honyakuki-win-x64-v0.2.10-preview.zip">便携 ZIP <span aria-hidden="true">↓</span></a>
+        <a class="primary" href="/downloads/v0.2.11-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.11-preview.exe"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3h8v8H3zm10 0h8v8h-8zM3 13h8v8H3zm10 0h8v8h-8z"/></svg>下载 Windows 安装程序</a>
+        <a class="quiet" href="https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.11-preview/Mugonzei-Honyakuki-win-x64-v0.2.11-preview.zip">便携 ZIP <span aria-hidden="true">↓</span></a>
       </div>
-      <p class="release">Windows x64 <span>·</span> v0.2.10-preview <span>·</span> <a href="https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.10-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.10-preview.exe">GitHub 备用下载</a> <span>·</span> <a href="https://github.com/pan0001/mugonzei-honyakuki/releases">GitHub 版本记录</a></p>
+      <p class="release">Windows x64 <span>·</span> v0.2.11-preview <span>·</span> <a href="https://github.com/pan0001/mugonzei-honyakuki/releases/download/v0.2.11-preview/Mugonzei-Honyakuki-Setup-win-x64-v0.2.11-preview.exe">GitHub 备用下载</a> <span>·</span> <a href="https://github.com/pan0001/mugonzei-honyakuki/releases">GitHub 版本记录</a></p>
     </div>
     <figure class="sim" id="sim" data-mode="vr">
       <div class="sim-head">
@@ -104,7 +104,7 @@
       <div class="start-list">
         <article><span class="symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M4 5h16v11H4zM8 20h8m-4-4v4"/></svg></span><div><h3>在桌面截图</h3><p>选择「自动」后，SteamVR 未运行时按 <kbd>Ctrl</kbd> + <kbd>Alt</kbd> + <kbd>T</kbd> 截图并翻译。默认截取主显示器；也可在工作台选择「指定窗口」，只翻译所选应用。</p></div></article>
         <article><span class="symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M5 7h14l2 4v6h-6l-3-3-3 3H3v-6z"/><path d="M7 11h2m6 0h2"/></svg></span><div><h3>在 SteamVR 截图</h3><p>自行启动 SteamVR 并连接头显后，「自动」会切换到 VR。Touch / Quest 默认长按左 X 1.5 秒触发截图。继续按到 3 秒可取消。</p></div></article>
-        <article><span class="symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 5h14v10h-7l-4 4v-4H3zM8 9h5m6 0h2v11h-8v-2"/></svg></span><div><h3>选择翻译服务</h3><p>积分账户完整翻译成功一次扣 1 积分。你也可使用自备视觉 API、本机 Codex，或本地 OCR 搭配 Google 翻译。直接翻译截图或手写字时，模型只接收一次请求并返回译文；本地 OCR 则可对照原文。</p></div></article>
+        <article><span class="symbol" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M3 5h14v10h-7l-4 4v-4H3zM8 9h5m6 0h2v11h-8v-2"/></svg></span><div><h3>选择翻译服务</h3><p>积分账户完整翻译成功一次扣 1 积分。你也可使用自备视觉 API、本机 Codex、本地 OCR 搭配 Google 翻译，或用 Google 搜索 AI 模式直接翻译截图（实验性，无需 API 密钥）。直接翻译截图或手写字时，模型只接收一次请求并返回译文；本地 OCR 则可对照原文。</p></div></article>
       </div>
     </div>
   </section>
@@ -115,7 +115,7 @@
       <details><summary>游戏截图里哪些文字会被翻译？</summary><p>优先翻译对白、手写留言、路牌和任务文字，尽量跳过性能监控、按键提示和 Windows 任务栏。相同字幕在画面里出现两次时，会尽量只显示一次。截取网页或文档时，则优先翻译正文。</p></details>
       <details><summary>不戴头显也能使用吗？</summary><p>可以。在 Windows x64 电脑上选择「桌面」即可一直使用桌面字幕；选择「自动」则会跟随 SteamVR 的连接状态。程序不会为你启动 SteamVR。</p></details>
       <details><summary>安装版和便携 ZIP 怎么选？</summary><p>安装程序适合从开始菜单启动与原位更新。使用便携版时，把 ZIP 全部解压到可写目录后运行 SteamVrTranslator.exe。更新前请先退出旧版，同一 Windows 用户的原有设置会保留。</p></details>
-      <details><summary>怎样检查新版本？</summary><p>如果正在使用 v0.2.5-preview 或更早版本，请从本页手动下载 v0.2.10-preview。之后可点击工作台左侧导航底部的「检查更新」（窄窗口位于顶部导航右侧），查看当前版本和 GitHub 最新版本。有新版时，点「下载新版」在浏览器下载安装程序，再退出翻译器并安装。如果没有对应的安装程序，可点「查看发布页」。</p></details>
+      <details><summary>怎样检查新版本？</summary><p>如果正在使用 v0.2.5-preview 或更早版本，请从本页手动下载 v0.2.11-preview。之后可点击工作台左侧导航底部的「检查更新」（窄窗口位于顶部导航右侧），查看当前版本和 GitHub 最新版本。有新版时，点「下载新版」在浏览器下载安装程序，再退出翻译器并安装。如果没有对应的安装程序，可点「查看发布页」。</p></details>
     </div>
   </section>
 </main>

@@ -93,7 +93,7 @@
             </div>
             <div role="tabpanel" id="prefsPanel" aria-labelledby="prefsTab" hidden>
             <section class="card form-card"><div class="card-head"><h2>服务与语言</h2><button type="button" class="quiet" data-action="setup">配置向导</button></div>
-              <div class="fields"><label class="field">翻译服务<select data-field="translationBackend"><option value="Credits">账号积分服务</option><option value="OpenAI">自己的 API</option><option value="Codex">本机 Codex</option><option value="GoogleTranslate">Google 翻译</option></select></label>
+              <div class="fields"><label class="field">翻译服务<select data-field="translationBackend"><option value="Credits">账号积分服务</option><option value="OpenAI">自己的 API</option><option value="Codex">本机 Codex</option><option value="GoogleTranslate">本地 OCR + Google 翻译</option><option value="GoogleSearchAI">Google 搜索 AI 模式（实验性）</option></select></label>
                 <label class="field">识图方式<select data-field="processingMode"><option value="Handwriting">手写截图直译（AI）</option><option value="Image">直接发送截图给模型</option><option value="LocalJapanese">本地日语手写 OCR</option><option value="Ocr">本地OCR（不推荐）</option></select></label>
                 <label class="field">目标语言<input data-field="targetLanguage" maxlength="100" required></label>
               </div><p class="hint" id="privacyHint"></p><p class="hint" id="localOcrStatus" hidden></p>
@@ -110,6 +110,7 @@
               <button type="button" data-action="checkCodex">检测 Codex 登录</button>
             </section>
             <section class="card form-card" data-provider="GoogleTranslate" hidden><h2>Google 翻译</h2><p class="hint">在本机识别，然后通过后台网页翻译原文。</p><div class="small-row"><button type="button" data-action="testGoogle" id="testGoogle">测试翻译</button><button type="button" class="quiet" data-action="googleBrowser">查看翻译网页</button></div><p class="feedback" id="googleTestResult" hidden></p></section>
+            <section class="card form-card" data-provider="GoogleSearchAI" hidden><h2>Google 搜索 AI 模式（实验性）</h2><p class="hint">无需 API 密钥，不消耗本应用积分。Google 可能限流，可用性因账号和地区而异。如需登录或验证，可打开网页处理。</p><button type="button" class="quiet" data-action="googleSearchAiBrowser">打开 Google 搜索 AI 网页</button></section>
             <details class="card form-card advanced"><summary>更多工具</summary><div class="small-row"><button type="button" data-action="recognize" id="recognizeButton"><span id="recognizeLabel">仅截屏识别</span></button><button type="button" class="quiet" data-action="settingsFolder">打开本机配置目录</button></div></details>
             </div>
             <div role="tabpanel" id="creditsPanel" aria-labelledby="creditsTab" hidden>

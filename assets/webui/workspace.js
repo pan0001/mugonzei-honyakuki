@@ -217,12 +217,15 @@
       display(byId("restoreOfficialCredit"), custom);
     }
     for (const group of all("[data-provider]")) display(group, group.dataset.provider === provider);
+    const searchAi = provider === "GoogleSearchAI";
+    disabled(fields.get("processingMode"), searchAi);
     for (const option of fields.get("processingMode").options) {
-      disabled(option, provider === "GoogleTranslate" && ["Image", "Handwriting"].includes(option.value));
+      disabled(option, (provider === "GoogleTranslate" && ["Image", "Handwriting"].includes(option.value)) || (searchAi && option.value !== "Image"));
     }
-    const destination = {OpenAI:"你配置的 API", Credits:"积分服务器及其 AI 服务", Codex:"本机 Codex 配置的模型", GoogleTranslate:"Google 翻译"}[provider] || "所选翻译服务";
+    const destination = {OpenAI:"你配置的 API", Credits:"积分服务器及其 AI 服务", Codex:"本机 Codex 配置的模型", GoogleTranslate:"Google 翻译", GoogleSearchAI:"Google 搜索 AI 模式"}[provider] || "所选翻译服务";
     const sendsImage = recognition === "Image" || recognition === "Handwriting";
-    text(byId("privacyHint"), sendsImage ? "截图会发送给" + destination + "，一次请求直接返回译文。" : "图片在本机识别，原文会发送给" + destination + "。");
+    text(byId("privacyHint"), searchAi ? "截图和目标语言会发送给 Google 搜索 AI 模式。"
+      : sendsImage ? "截图会发送给" + destination + "，一次请求直接返回译文。" : "图片在本机识别，原文会发送给" + destination + "。");
     disableWithReason(fields.get("showSource"), sendsImage, "本地 OCR 翻译可同时显示原文；截图直译只返回译文");
     optionalText("localOcrStatus", recognition === "LocalJapanese" ? state.localOcrStatus : "");
     display(byId("selectionDistanceField"), Boolean(current("spatialSelectionEnabled")));
@@ -252,9 +255,10 @@
       }
       lastKeyOrigin = nextOrigin;
     }
-    if (field === "translationBackend" && value === "GoogleTranslate" && ["Handwriting", "Image"].includes(current("processingMode"))) {
-      changeField("processingMode", "Ocr");
-      write(fields.get("processingMode"), "Ocr");
+    if (field === "translationBackend" && (value === "GoogleSearchAI" || (value === "GoogleTranslate" && ["Handwriting", "Image"].includes(current("processingMode"))))) {
+      const mode = value === "GoogleSearchAI" ? "Image" : "Ocr";
+      changeField("processingMode", mode);
+      write(fields.get("processingMode"), mode);
     }
     if (field === "desktopCaptureSource") {
       if (value === "Window") requestDesktopWindows();
@@ -477,7 +481,7 @@
     if (Object.hasOwn(small, "canCancel") || Object.hasOwn(small, "busy"))
       disableWithReason(byId("cancelTask"), !Boolean(state.canCancel ?? state.busy), "当前没有可取消的任务");
     if (Object.hasOwn(small, "canRecognize"))
-      disableWithReason(byId("recognizeButton"), state.canRecognize === false, "积分服务需要同时识别并翻译");
+      disableWithReason(byId("recognizeButton"), state.canRecognize === false, "当前服务直接翻译截图，仅提供译文");
     if (["pages","page","busy"].some(key => Object.hasOwn(small, key))) {
       const count = Number(state.pages) || 0;
       const index = count ? Math.max(1, Math.min(count, Number(state.page) || 1)) : 0;

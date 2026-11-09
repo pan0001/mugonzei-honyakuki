@@ -139,6 +139,12 @@ public static class SetupWizardTests
                 "Google Translate cannot be configured as an image recognizer");
         foreach (string language in new[] { "简体中文", "日语", "en", "fr" })
             SettingsValidation.ValidateForSave(new AppSettings { TranslationBackend = "GoogleTranslate", TargetLanguage = language }, true);
+        SettingsValidation.ValidateForSave(new AppSettings { TranslationBackend = "GoogleSearchAI", ProcessingMode = "Image", TargetLanguage = "日本語" }, true);
+        foreach (string mode in new[] { "Ocr", "LocalJapanese", "Handwriting" })
+            Reject(() => SettingsValidation.ValidateForSave(new AppSettings { TranslationBackend = "GoogleSearchAI", ProcessingMode = mode }),
+                "Google Search AI only supports direct image translation");
+        Reject(() => SettingsValidation.ValidateForSave(new AppSettings { TranslationBackend = "googlesearchai", ProcessingMode = "Image" }),
+            "The persisted backend identifier is case-sensitive");
         foreach (string language in new[] { "auto", "not a language code" })
             Reject(() => SettingsValidation.ValidateForSave(new AppSettings { TranslationBackend = "GoogleTranslate", TargetLanguage = language }, true),
                 "Google target language must be valid before completing setup");
@@ -241,17 +247,20 @@ public static class SetupWizardTests
 
     private static void ReopenedServicesKeepSettings()
     {
-        foreach (string service in new[] { "Credits", "OpenAI", "Codex", "GoogleTranslate" })
+        foreach (string service in new[] { "Credits", "OpenAI", "Codex", "GoogleTranslate", "GoogleSearchAI" })
         {
             var initial = DetailedSettings();
             initial.TranslationBackend = service;
             initial.CreditServerUrl = "https://custom-credit-fixture.invalid/service/";
             if (service == "GoogleTranslate") initial.ProcessingMode = "LocalJapanese";
+            if (service == "GoogleSearchAI") initial.ProcessingMode = "Image";
             AppSettings? saved = null;
             using var wizard = Create(initial, draft => saved = draft, firstRun: false);
             Show(wizard);
             AssertSettingsEqual(initial, wizard.ReadSettingsDraft(), "Reopening preserves every provider's original settings: " + service);
             Check(wizard.TryAdvance(), "Reopened settings reach their own service configuration");
+            if (service == "GoogleSearchAI") Check(!Named<ComboBox>(wizard, "wizardProcessingMode").Enabled,
+                "Native setup fixes Google Search AI to screenshot input while keeping the target language editable");
             if (service == "Credits")
             {
                 Check(Named<Label>(wizard, "wizardCustomLoginOrigin").Text.Contains(initial.CreditServerUrl)
@@ -441,14 +450,14 @@ public static class SetupWizardTests
 
     private static void CheckServiceCards(SetupWizardForm wizard)
     {
-        string[] names = ["wizardServiceCredits", "wizardServiceApi", "wizardServiceCodex", "wizardServiceGoogle"];
-        string[] labels = ["账号积分服务（推荐）", "使用自己的 API 服务", "连接本机 Codex", "本地 OCR + Google 翻译"];
+        string[] names = ["wizardServiceCredits", "wizardServiceApi", "wizardServiceCodex", "wizardServiceGoogle", "wizardServiceGoogleSearchAi"];
+        string[] labels = ["账号积分服务（推荐）", "使用自己的 API 服务", "连接本机 Codex", "本地 OCR + Google 翻译", "Google 搜索 AI 模式（实验性）"];
         var cards = names.Select(name => Named<RadioButton>(wizard, name)).ToArray();
         var selected = cards.Single(card => card.Checked);
         var mode = Named<ComboBox>(wizard, "wizardProcessingMode");
         int previousMode = mode.SelectedIndex;
         Check(!Descendants(wizard).Any(control => control.Name == "wizardBackend"), "Service cards replace the legacy provider dropdown");
-        Check(cards.Select(card => card.Text).SequenceEqual(labels), "The four service cards use the intended order and labels");
+        Check(cards.Select(card => card.Text).SequenceEqual(labels), "The service cards use the intended order and labels");
         var viewport = Named<Panel>(wizard, "wizardViewport");
         wizard.PerformLayout(); Application.DoEvents();
         var positions = cards.Select(card => card.RectangleToScreen(card.ClientRectangle).Top).ToArray();

@@ -65,6 +65,8 @@ internal static class WebSettingsPatch
                 default: throw Invalid();
             }
         }
+        if (seen.Contains("translationBackend") && next.TranslationBackend == "GoogleSearchAI" && !seen.Contains("processingMode"))
+            next.ProcessingMode = "Image";
         if (!seen.Contains("apiKey") && ApiProviderPresets.ChangesAuthority(current.ApiBaseUrl, next.ApiBaseUrl)) next.ApiKey = "";
         return next;
     }
