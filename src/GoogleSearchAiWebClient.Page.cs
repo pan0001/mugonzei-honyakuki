@@ -11,9 +11,10 @@ public sealed partial class GoogleSearchAiWebClient
     internal static string GuardedScript(string expression, string? expectedDocument)
     {
         return """
-            (()=>{const url=new URL(location.href);
-            if(window!==window.top||url.origin!=='https://www.google.com'||url.username||url.password)return {state:'unsafe'};
-            const path=url.pathname;
+            (()=>{if(window!==window.top||location.origin!=='https://www.google.com')return {state:'unsafe'};
+            const url=new URL(location.href);
+            if(url.username||url.password)return {state:'unsafe'};
+            const path=location.pathname;
             if(path!=='/aimode'){
               const values=url.searchParams.getAll(path==='/webhp'?'aep':'udm');
               if(values.length!==1||!((path==='/webhp'&&values[0]==='11')||(path==='/search'&&values[0]==='50')))return {state:'unsafe'};
