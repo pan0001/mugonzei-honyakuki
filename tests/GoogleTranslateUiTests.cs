@@ -27,8 +27,9 @@ public static class GoogleTranslateUiTests
                     var mode = Field<ComboBox>(form, "processingMode");
                     var showSource = Field<CheckBox>(form, "showSource");
                     var recognize = Field<Button>(form, "recognizeButton");
-                    Check(backend.Items.Count == 4 && backend.GetItemText(backend.Items[2]) == "Google Translate（后台网页）",
-                        "Google Translate is a separate third backend, not the Gemini API preset");
+                    Check(backend.GetItemText(backend.Items[2]) == "Google Translate（后台网页）"
+                        && backend.Items.Cast<object>().Any(item => backend.GetItemText(item)?.StartsWith("Google 搜索 AI 模式", StringComparison.Ordinal) == true),
+                        "The legacy text-only Google Translate selection stays distinct from Google Search AI Mode");
                     Check(!form.HasPendingAiSettings, "Demo defaults begin without unsaved AI changes");
 
                     backend.SelectedIndex = 2;
